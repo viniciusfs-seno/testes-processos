@@ -14,25 +14,30 @@ import { Db5NfTotalDto } from './dto/db5-nf-total.dto';
 export class RelatoriosController {
   constructor(private readonly service: RelatoriosService) {}
 
-  // ─── DB1 ──────────────────────────────────────────────────────────────────────
+  // ─── DB1 ─────────────────────────────────────────────────────────────────────
   @Post('db1/cnsd-resumo')
   async cnsdResumo(@Body() dto: Db1CnsdResumoDto) {
     return this.service.resumoDb1Cnsd(dto);
   }
 
-  // ─── DB2 ──────────────────────────────────────────────────────────────────────
+  // ─── DB2 ─────────────────────────────────────────────────────────────────────
   @Post('db2/vendas-resumo')
   async vendasEmporiumResumo(@Body() dto: Db2VendasResumoDto) {
     return this.service.resumoDb2Vendas(dto);
   }
 
-  // ─── DB3 ──────────────────────────────────────────────────────────────────────
-  @Post('db3/vendas-resumo')
-  async vendasConsincoResumo(@Body() dto: Db3VendasResumoDto) {
-    return this.service.resumoDb3Vendas(dto);
+  // ─── DB3 ─────────────────────────────────────────────────────────────────────
+  @Post('db3/vendas-resumo-mercantil')
+  async vendasConsincoResumoMercantil(@Body() dto: Db3VendasResumoDto) {
+    return this.service.resumoDb3VendasMercantil(dto);
   }
 
-  // ─── DB4 ──────────────────────────────────────────────────────────────────────
+  @Post('db3/vendas-resumo-giga')
+  async vendasConsincoResumoGiga(@Body() dto: Db3VendasResumoDto) {
+    return this.service.resumoDb3VendasGiga(dto);
+  }
+
+  // ─── DB4 ─────────────────────────────────────────────────────────────────────
   @Post('db4/vendas-resumo')
   async vendasFarmaciasResumo(@Body() dto: Db4VendasResumoDto) {
     return this.service.resumoDb4Vendas(dto);
@@ -48,7 +53,7 @@ export class RelatoriosController {
     return this.service.totalDb4Vendas(dto);
   }
 
-  // ─── DB5 ──────────────────────────────────────────────────────────────────────
+  // ─── DB5 ─────────────────────────────────────────────────────────────────────
   @Post('db5/nf-resumo')
   async nfMdlogResumo(@Body() dto: Db5NfResumoDto) {
     return this.service.resumoDb5Nf(dto);
@@ -64,9 +69,12 @@ export class RelatoriosController {
     return this.service.totalDb5Nf(dto);
   }
 
-  // ─── Status ───────────────────────────────────────────────────────────────────
+  // ─── Status ──────────────────────────────────────────────────────────────────
   @Get('job/:queue/:id')
-  async getJobStatusByQueue(@Param('queue') queue: string, @Param('id') id: string) {
+  async getJobStatusByQueue(
+    @Param('queue') queue: string,
+    @Param('id') id: string,
+  ) {
     return this.service.getJobStatusByQueue(queue, id);
   }
 

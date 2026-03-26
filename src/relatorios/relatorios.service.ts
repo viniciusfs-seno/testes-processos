@@ -11,6 +11,8 @@ import { Db5NfResumoDto } from './dto/db5-nf-resumo.dto';
 import { Db5NfDetalheDto } from './dto/db5-nf-detalhe.dto';
 import { Db5NfTotalDto } from './dto/db5-nf-total.dto';
 
+type TipoEmpresaDb3 = 'MERCANTIL' | 'GIGA';
+
 @Injectable()
 export class RelatoriosService {
   constructor(
@@ -25,11 +27,17 @@ export class RelatoriosService {
 
   async resumoDb1Cnsd(dto: Db1CnsdResumoDto) {
     const job = await this.db1Queue.add('resumo-cnsd', dto, {
-      attempts: 3, backoff: 5000, timeout: 300000,
+      attempts: 3,
+      backoff: 5000,
+      timeout: 300000,
     });
+
     return {
-      jobId: job.id, queue: 'db1-relatorios', database: 'DB1',
-      status: 'enfileirado', statusUrl: `/relatorios/job/db1-relatorios/${job.id}`,
+      jobId: job.id,
+      queue: 'db1-relatorios',
+      database: 'DB1',
+      status: 'enfileirado',
+      statusUrl: `/relatorios/job/db1-relatorios/${job.id}`,
       message: `Use GET /relatorios/job/db1-relatorios/${job.id} para consultar status`,
     };
   }
@@ -38,63 +46,106 @@ export class RelatoriosService {
 
   async resumoDb2Vendas(dto: Db2VendasResumoDto) {
     const job = await this.db2Queue.add('vendas-resumo', dto, {
-      attempts: 3, backoff: 5000, timeout: 300000,
+      attempts: 3,
+      backoff: 5000,
+      timeout: 300000,
     });
+
     return {
-      jobId: job.id, queue: 'db2-relatorios', database: 'DB2',
-      status: 'enfileirado', statusUrl: `/relatorios/job/db2-relatorios/${job.id}`,
+      jobId: job.id,
+      queue: 'db2-relatorios',
+      database: 'DB2',
+      status: 'enfileirado',
+      statusUrl: `/relatorios/job/db2-relatorios/${job.id}`,
       message: `Use GET /relatorios/job/db2-relatorios/${job.id} para consultar status`,
     };
   }
 
   // ─── DB3 ────────────────────────────────────────────────────────────────────
 
-  async resumoDb3Vendas(dto: Db3VendasResumoDto) {
-    const job = await this.db3Queue.add('vendas-resumo', dto, {
-      attempts: 3, backoff: 5000, timeout: 600000,
-    });
+  private async adicionarJobDb3(dto: Db3VendasResumoDto, tipoEmpresa: TipoEmpresaDb3) {
+    const job = await this.db3Queue.add(
+      'vendas-resumo',
+      {
+        ...dto,
+        tipoEmpresa,
+      },
+      {
+        attempts: 3,
+        backoff: 5000,
+        timeout: 600000,
+      },
+    );
+
     return {
-      jobId: job.id, queue: 'db3-relatorios', database: 'DB3',
-      status: 'enfileirado', statusUrl: `/relatorios/job/db3-relatorios/${job.id}`,
+      jobId: job.id,
+      queue: 'db3-relatorios',
+      database: 'DB3 - CONSINCO',
+      tipoEmpresa,
+      status: 'enfileirado',
+      statusUrl: `/relatorios/job/db3-relatorios/${job.id}`,
       message: `Use GET /relatorios/job/db3-relatorios/${job.id} para consultar status`,
     };
+  }
+
+  async resumoDb3VendasMercantil(dto: Db3VendasResumoDto) {
+    return this.adicionarJobDb3(dto, 'MERCANTIL');
+  }
+
+  async resumoDb3VendasGiga(dto: Db3VendasResumoDto) {
+    return this.adicionarJobDb3(dto, 'GIGA');
   }
 
   // ─── DB4 ────────────────────────────────────────────────────────────────────
 
   async resumoDb4Vendas(dto: Db4VendasResumoDto) {
     const job = await this.db4Queue.add('vendas-resumo', dto, {
-      attempts: 3, backoff: 5000, timeout: 300000,
+      attempts: 3,
+      backoff: 5000,
+      timeout: 300000,
     });
+
     return {
-      jobId: job.id, queue: 'db4-relatorios',
+      jobId: job.id,
+      queue: 'db4-relatorios',
       database: 'DB4 - Emporium Farmácias (MySQL)',
-      status: 'enfileirado', statusUrl: `/relatorios/job/db4-relatorios/${job.id}`,
+      status: 'enfileirado',
+      statusUrl: `/relatorios/job/db4-relatorios/${job.id}`,
       message: `Use GET /relatorios/job/db4-relatorios/${job.id} para consultar status`,
     };
   }
 
   async detalheDb4Vendas(dto: Db4VendasDetalheDto) {
     const job = await this.db4Queue.add('vendas-detalhe', dto, {
-      attempts: 3, backoff: 5000, timeout: 300000,
+      attempts: 3,
+      backoff: 5000,
+      timeout: 300000,
     });
+
     return {
-      jobId: job.id, queue: 'db4-relatorios',
+      jobId: job.id,
+      queue: 'db4-relatorios',
       database: 'DB4 - Emporium Farmácias (MySQL)',
-      status: 'enfileirado', statusUrl: `/relatorios/job/db4-relatorios/${job.id}`,
+      status: 'enfileirado',
+      statusUrl: `/relatorios/job/db4-relatorios/${job.id}`,
       message: `Use GET /relatorios/job/db4-relatorios/${job.id} para consultar status`,
     };
   }
 
   async totalDb4Vendas(dto: Db4VendasTotalDto) {
     const job = await this.db4Queue.add('vendas-total', dto, {
-      attempts: 3, backoff: 5000, timeout: 300000,
+      attempts: 3,
+      backoff: 5000,
+      timeout: 300000,
     });
+
     return {
-      jobId: job.id, queue: 'db4-relatorios',
+      jobId: job.id,
+      queue: 'db4-relatorios',
       database: 'DB4 - Emporium Farmácias (MySQL)',
       tipo: 'total_geral',
-      status: 'enfileirado', statusUrl: `/relatorios/job/db4-relatorios/${job.id}`,
+      status: 'enfileirado',
+      statusUrl: `/relatorios/job/db4-relatorios/${job.id}`,
       message: `Use GET /relatorios/job/db4-relatorios/${job.id} para consultar status`,
     };
   }
@@ -103,47 +154,72 @@ export class RelatoriosService {
 
   async resumoDb5Nf(dto: Db5NfResumoDto) {
     const job = await this.db5Queue.add('nf-resumo', dto, {
-      attempts: 3, backoff: 5000, timeout: 300000,
+      attempts: 3,
+      backoff: 5000,
+      timeout: 300000,
     });
+
     return {
-      jobId: job.id, queue: 'db5-relatorios', database: 'DB5 - MDLog (Oracle)',
-      status: 'enfileirado', statusUrl: `/relatorios/job/db5-relatorios/${job.id}`,
+      jobId: job.id,
+      queue: 'db5-relatorios',
+      database: 'DB5 - MDLog (Oracle)',
+      status: 'enfileirado',
+      statusUrl: `/relatorios/job/db5-relatorios/${job.id}`,
       message: `Use GET /relatorios/job/db5-relatorios/${job.id} para consultar status`,
     };
   }
 
   async detalheDb5Nf(dto: Db5NfDetalheDto) {
     const job = await this.db5Queue.add('nf-detalhe', dto, {
-      attempts: 3, backoff: 5000, timeout: 300000,
+      attempts: 3,
+      backoff: 5000,
+      timeout: 300000,
     });
+
     return {
-      jobId: job.id, queue: 'db5-relatorios', database: 'DB5 - MDLog (Oracle)',
-      status: 'enfileirado', statusUrl: `/relatorios/job/db5-relatorios/${job.id}`,
+      jobId: job.id,
+      queue: 'db5-relatorios',
+      database: 'DB5 - MDLog (Oracle)',
+      status: 'enfileirado',
+      statusUrl: `/relatorios/job/db5-relatorios/${job.id}`,
       message: `Use GET /relatorios/job/db5-relatorios/${job.id} para consultar status`,
     };
   }
 
   async totalDb5Nf(dto: Db5NfTotalDto) {
     const job = await this.db5Queue.add('nf-total', dto, {
-      attempts: 3, backoff: 5000, timeout: 300000,
+      attempts: 3,
+      backoff: 5000,
+      timeout: 300000,
     });
+
     return {
-      jobId: job.id, queue: 'db5-relatorios', database: 'DB5 - MDLog (Oracle)',
+      jobId: job.id,
+      queue: 'db5-relatorios',
+      database: 'DB5 - MDLog (Oracle)',
       tipo: 'total_geral',
-      status: 'enfileirado', statusUrl: `/relatorios/job/db5-relatorios/${job.id}`,
+      status: 'enfileirado',
+      statusUrl: `/relatorios/job/db5-relatorios/${job.id}`,
       message: `Use GET /relatorios/job/db5-relatorios/${job.id} para consultar status`,
     };
   }
 
-  // ─── Helpers ─────────────────────────────────────────────────────────────────
+  // ─── Helpers ────────────────────────────────────────────────────────────────
 
   private calcularDuracao(processedOn: number | undefined, finishedOn: number | undefined) {
-    if (!processedOn || !finishedOn) return { duracaoMs: null, duracaoFormatada: null };
+    if (!processedOn || !finishedOn) {
+      return { duracaoMs: null, duracaoFormatada: null };
+    }
+
     const duracaoMs = finishedOn - processedOn;
     const segundosTotais = Math.floor(duracaoMs / 1000);
     const minutos = Math.floor(segundosTotais / 60);
     const segundos = segundosTotais % 60;
-    return { duracaoMs, duracaoFormatada: `${minutos}min ${segundos}s` };
+
+    return {
+      duracaoMs,
+      duracaoFormatada: `${minutos}min ${segundos}s`,
+    };
   }
 
   private get allQueues(): Record<string, Queue> {
@@ -156,47 +232,93 @@ export class RelatoriosService {
     };
   }
 
-  private buildJobResponse(job: any, queueName: string, state: string, progress: any, logs: any) {
-    const { duracaoMs, duracaoFormatada } = this.calcularDuracao(job.processedOn, job.finishedOn);
+  private getDatabaseName(queueName: string, jobData?: any) {
+    switch (queueName) {
+      case 'db1-relatorios':
+        return 'DB1';
+      case 'db2-relatorios':
+        return 'DB2';
+      case 'db3-relatorios':
+        return jobData?.tipoEmpresa
+          ? `DB3 - CONSINCO (${jobData.tipoEmpresa})`
+          : 'DB3 - CONSINCO';
+      case 'db4-relatorios':
+        return 'DB4 - Emporium Farmácias (MySQL)';
+      case 'db5-relatorios':
+        return 'DB5 - MDLog (Oracle)';
+      default:
+        return queueName.replace('-relatorios', '').toUpperCase();
+    }
+  }
+
+  private buildJobResponse(
+    job: any,
+    queueName: string,
+    state: string,
+    progress: any,
+    logs: { logs: string[] },
+  ) {
+    const { duracaoMs, duracaoFormatada } = this.calcularDuracao(
+      job.processedOn,
+      job.finishedOn,
+    );
+
     return {
-      jobId: job.id, queue: queueName,
-      database: queueName.replace('-relatorios', '').toUpperCase(),
-      status: state, progress, data: job.data,
+      jobId: job.id,
+      queue: queueName,
+      database: this.getDatabaseName(queueName, job.data),
+      status: state,
+      progress,
+      data: job.data,
       result: state === 'completed' ? job.returnvalue : null,
-      logs: logs.logs, failedReason: job.failedReason,
-      timestamp: job.timestamp, processedOn: job.processedOn,
-      finishedOn: job.finishedOn, duracaoMs, duracaoFormatada,
+      logs: logs.logs,
+      failedReason: job.failedReason,
+      timestamp: job.timestamp,
+      processedOn: job.processedOn,
+      finishedOn: job.finishedOn,
+      duracaoMs,
+      duracaoFormatada,
     };
   }
 
-  // ─── Status ──────────────────────────────────────────────────────────────────
+  // ─── Status ─────────────────────────────────────────────────────────────────
 
   async getJobStatusByQueue(queueName: string, jobId: string) {
     const queues = this.allQueues;
     const queue = queues[queueName];
+
     if (!queue) {
       throw new NotFoundException(
         `Fila '${queueName}' não encontrada. Use: ${Object.keys(queues).join(', ')}`,
       );
     }
+
     const job = await queue.getJob(jobId);
-    if (!job) throw new NotFoundException(`Job ${jobId} não encontrado na fila ${queueName}`);
+
+    if (!job) {
+      throw new NotFoundException(`Job ${jobId} não encontrado na fila ${queueName}`);
+    }
+
     const state = await job.getState();
     const progress = job.progress();
     const logs = await queue.getJobLogs(jobId);
+
     return this.buildJobResponse(job, queueName, state, progress, logs);
   }
 
   async getJobStatus(jobId: string) {
     for (const [queueName, queue] of Object.entries(this.allQueues)) {
       const job = await queue.getJob(jobId);
+
       if (job) {
         const state = await job.getState();
         const progress = job.progress();
         const logs = await queue.getJobLogs(jobId);
+
         return this.buildJobResponse(job, queueName, state, progress, logs);
       }
     }
+
     throw new NotFoundException(`Job ${jobId} não encontrado em nenhuma fila`);
   }
 }

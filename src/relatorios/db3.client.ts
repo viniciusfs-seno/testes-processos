@@ -2,6 +2,8 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 
+type TipoEmpresaDb3 = 'MERCANTIL' | 'GIGA';
+
 @Injectable()
 export class Db3Client {
   constructor(private readonly configService: ConfigService) {}
@@ -26,12 +28,35 @@ export class Db3Client {
     }
   }
 
-  // PÚBLICO: usado pelo processor
+  private validarSegmento(segmento: string) {
+    if (!/^\d+$/.test(segmento)) {
+      throw new BadRequestException(`Segmento inválido: ${segmento}`);
+    }
+  }
+
+  private obterFaixaEmpresa(tipoEmpresa: TipoEmpresaDb3) {
+    if (tipoEmpresa === 'MERCANTIL') {
+      return { inicio: 800, fim: 849 };
+    }
+
+    if (tipoEmpresa === 'GIGA') {
+      return { inicio: 101, fim: 159 };
+    }
+
+    throw new BadRequestException(`Tipo de empresa inválido: ${tipoEmpresa}`);
+  }
+
   async consultarPorSegmento(
     dataInicial: string,
     dataFinal: string,
     segmento: string,
+    tipoEmpresa: TipoEmpresaDb3,
   ): Promise<any[]> {
+    this.validarPeriodo(dataInicial, dataFinal);
+    this.validarSegmento(segmento);
+
+    const faixa = this.obterFaixaEmpresa(tipoEmpresa);
+
     const dataSource = new DataSource({
       type: 'oracle',
       host: this.configService.get<string>('DB3_HOST'),
@@ -50,12 +75,24 @@ export class Db3Client {
       const query = `
         SELECT 
           TO_CHAR(V.DTAVDA, 'DD/MM/YYYY') AS DATA,
-          ${segmento} AS SEGMENTO,
-          SUM( ( ROUND( V.VLRITEM, 2 ) ) - ( ROUND( V.VLRDEVOLITEM, 2 ) - ( 0 ) ) ) AS VALOR
+          :segmento AS SEGMENTO,
+          :tipoEmpresa AS TIPO_EMPRESA,
+          SUM(
+            ROUND(V.VLRITEM, 2) - (ROUND(V.VLRDEVOLITEM, 2) - 0)
+          ) AS VALOR
         FROM 
-          MRL_CUSTODIAFAM Y, MAXV_ABCDISTRIBBASE V, MAP_PRODUTO A, MAP_PRODUTO PB, 
-          MAP_FAMDIVISAO D, MAP_FAMEMBALAGEM K, MAX_EMPRESA E, MAX_DIVISAO DV, 
-          MAP_PRODACRESCCUSTORELAC PR, MAP_FAMILIA FAM, MAX_CODGERALOPER G2, PDV_DOCTO PD
+          MRL_CUSTODIAFAM Y,
+          MAXV_ABCDISTRIBBASE V,
+          MAP_PRODUTO A,
+          MAP_PRODUTO PB,
+          MAP_FAMDIVISAO D,
+          MAP_FAMEMBALAGEM K,
+          MAX_EMPRESA E,
+          MAX_DIVISAO DV,
+          MAP_PRODACRESCCUSTORELAC PR,
+          MAP_FAMILIA FAM,
+          MAX_CODGERALOPER G2,
+          PDV_DOCTO PD
         WHERE 
           D.SEQFAMILIA = A.SEQFAMILIA
           AND D.NRODIVISAO = V.NRODIVISAO
@@ -76,8 +113,8 @@ export class Db3Client {
           AND V.DTAVDA = PD.DTAMOVIMENTO
           AND V.CHECKOUT = PD.NROCHECKOUT
           AND V.NRODOCTO = PD.NUMERODF
-          AND V.NROEMPRESA > 0
-          AND V.NROSEGMENTO = '${segmento}'
+          AND V.NROSEGMENTO = :segmento
+          AND V.NROEMPRESA BETWEEN :empresaInicio AND :empresaFim
           AND K.QTDEMBALAGEM = 1
           AND DECODE(V.TIPTABELA, 'S', V.CGOACMCOMPRAVENDA, V.ACMCOMPRAVENDA) IN ('S', 'I')
           AND V.CHECKOUT > 0
@@ -88,7 +125,16 @@ export class Db3Client {
           V.DTAVDA
       `;
 
-      const result = await dataSource.query(query, [dataInicial, dataFinal]);
+      const params = {
+        dataIni: dataInicial,
+        dataFim: dataFinal,
+        segmento,
+        tipoEmpresa,
+        empresaInicio: faixa.inicio,
+        empresaFim: faixa.fim,
+      };
+
+      const result = await dataSource.query(query, params);
       return result;
     } finally {
       if (dataSource.isInitialized) {
