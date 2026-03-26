@@ -13,7 +13,10 @@ async function bootstrap() {
       oracledb.initOracleClient({ libDir: 'C:\\oracle\\instantclient_19_30' });
       console.log('Oracle Thick mode ativado via caminho explícito');
     } catch (err) {
-      console.warn('Oracle Thick mode não disponível — usando Thin mode:', err.message);
+      console.warn(
+        'Oracle Thick mode não disponível — usando Thin mode:',
+        err.message,
+      );
       // Thin mode continua funcionando para DB1, DB2, DB3 (versões modernas)
     }
   }
