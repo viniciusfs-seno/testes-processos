@@ -10,11 +10,28 @@ import { Db4VendasTotalDto } from './dto/db4-vendas-total.dto';
 import { Db5NfResumoDto } from './dto/db5-nf-resumo.dto';
 import { Db5NfDetalheDto } from './dto/db5-nf-detalhe.dto';
 import { Db5NfTotalDto } from './dto/db5-nf-total.dto';
+import { RelatorioSubidaVendasDto } from './dto/relatorio-subida-vendas.dto';
 
 type TipoEmpresaDb3 = 'MERCANTIL' | 'GIGA';
 
 @Injectable()
 export class RelatoriosService {
+  private ultimoRelatorioSubida:
+    | {
+        criadoEm: string;
+        dataIni: string;
+        dataFim: string;
+        jobs: Array<{
+          nome: string;
+          database: string;
+          queue: string;
+          jobId: string | number;
+          statusUrl: string;
+          payload: Record<string, any>;
+        }>;
+      }
+    | null = null;
+
   constructor(
     @InjectQueue('db1-relatorios') private db1Queue: Queue,
     @InjectQueue('db2-relatorios') private db2Queue: Queue,
@@ -22,6 +39,97 @@ export class RelatoriosService {
     @InjectQueue('db4-relatorios') private db4Queue: Queue,
     @InjectQueue('db5-relatorios') private db5Queue: Queue,
   ) {}
+
+  // Relatorio Subida de Vendas
+  async relatorioSubidaVendas(dto: RelatorioSubidaVendasDto) {
+    const { dataIni, dataFim } = this.resolvePeriodo(dto);
+    const payloadBase = { dataIni, dataFim };
+    const payloadLoja = { dataIni, dataFim, cdLoja: 0 };
+
+    const [
+      db1,
+      db2,
+      db3Mercantil,
+      db3Giga,
+      db4,
+      db5,
+    ] = await Promise.all([
+      this.resumoDb1Cnsd(payloadBase as Db1CnsdResumoDto),
+      this.resumoDb2Vendas(payloadBase as Db2VendasResumoDto),
+      this.resumoDb3VendasMercantil(payloadBase as Db3VendasResumoDto),
+      this.resumoDb3VendasGiga(payloadBase as Db3VendasResumoDto),
+      this.resumoDb4Vendas(payloadLoja as Db4VendasResumoDto),
+      this.resumoDb5Nf(payloadLoja as Db5NfResumoDto),
+    ]);
+
+    const jobs = [
+      {
+        nome: 'Emporium lojas (bandeiras)',
+        database: db1.database ?? 'DB1',
+        queue: db1.queue,
+        jobId: db1.jobId,
+        statusUrl: db1.statusUrl,
+        payload: payloadBase,
+      },
+      {
+        nome: 'Emporium atacado (Mercantil)',
+        database: db2.database ?? 'DB2',
+        queue: db2.queue,
+        jobId: db2.jobId,
+        statusUrl: db2.statusUrl,
+        payload: payloadBase,
+      },
+      {
+        nome: 'Consinco (Mercantil)',
+        database: db3Mercantil.database ?? 'DB3 - CONSINCO (MERCANTIL)',
+        queue: db3Mercantil.queue,
+        jobId: db3Mercantil.jobId,
+        statusUrl: db3Mercantil.statusUrl,
+        payload: payloadBase,
+      },
+      {
+        nome: 'Consinco (Giga) por hora',
+        database: db3Giga.database ?? 'DB3 - CONSINCO (GIGA)',
+        queue: db3Giga.queue,
+        jobId: db3Giga.jobId,
+        statusUrl: db3Giga.statusUrl,
+        payload: payloadBase,
+      },
+      {
+        nome: 'Emporium farmacias',
+        database: db4.database ?? 'DB4 - Emporium Farmacias (MySQL)',
+        queue: db4.queue,
+        jobId: db4.jobId,
+        statusUrl: db4.statusUrl,
+        payload: payloadLoja,
+      },
+      {
+        nome: 'MDLog',
+        database: db5.database ?? 'DB5 - MDLog (Oracle)',
+        queue: db5.queue,
+        jobId: db5.jobId,
+        statusUrl: db5.statusUrl,
+        payload: payloadLoja,
+      },
+    ];
+
+    this.ultimoRelatorioSubida = {
+      criadoEm: this.getFortalezaDateTime(),
+      dataIni,
+      dataFim,
+      jobs,
+    };
+
+    return jobs;
+  }
+
+  getUltimoRelatorioSubidaVendas() {
+    if (!this.ultimoRelatorioSubida) {
+      return { encontrado: false };
+    }
+
+    return { encontrado: true, ...this.ultimoRelatorioSubida };
+  }
 
   // ─── DB1 ────────────────────────────────────────────────────────────────────
 
@@ -205,6 +313,51 @@ export class RelatoriosService {
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
+
+  private getFortalezaDateParts() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Fortaleza',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+
+    const map = Object.fromEntries(
+      parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+    ) as Record<string, string>;
+
+    return { year: map.year, month: map.month, day: map.day };
+  }
+
+  private getFortalezaDateTime() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Fortaleza',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+
+    const map = Object.fromEntries(
+      parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+    ) as Record<string, string>;
+
+    return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}`;
+  }
+
+  private getTodayFortalezaIso() {
+    const { year, month, day } = this.getFortalezaDateParts();
+    return `${year}-${month}-${day}`;
+  }
+
+  private resolvePeriodo(dto?: { dataIni?: string; dataFim?: string }) {
+    const today = this.getTodayFortalezaIso();
+    const dataIni = dto?.dataIni ?? dto?.dataFim ?? today;
+    const dataFim = dto?.dataFim ?? dto?.dataIni ?? today;
+    return { dataIni, dataFim };
+  }
 
   private calcularDuracao(processedOn: number | undefined, finishedOn: number | undefined) {
     if (!processedOn || !finishedOn) {

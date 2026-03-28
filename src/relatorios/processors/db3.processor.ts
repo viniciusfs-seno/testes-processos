@@ -30,6 +30,10 @@ export class Db3Processor {
     job.log(`Iniciando DB3 ${tipoEmpresa}: ${listaSegmentos.length} segmentos (sequencial)`);
     await job.progress(5);
 
+    if (tipoEmpresa === 'GIGA') {
+      return this.handleGigaPorHora(job, dataIni, dataFim, listaSegmentos);
+    }
+
     const consolidado = new Map<string, number>();
     const totalSegmentos = listaSegmentos.length;
 
@@ -83,5 +87,124 @@ export class Db3Processor {
       registros,
       metodo: 'fila_sequencial',
     };
+  }
+
+  private async handleGigaPorHora(
+    job: Job,
+    dataIni: string,
+    dataFim: string,
+    listaSegmentos: string[],
+  ) {
+    const { horaInicio, horaFim } = this.getFaixaHorariaAtual();
+    const faixaHoras = {
+      inicio: `${this.pad(horaInicio)}:00`,
+      fim: `${this.pad(horaFim)}:00`,
+    };
+
+    if (dataIni !== dataFim) {
+      job.log(
+        `Aviso: consulta por hora usa apenas dataIni (${dataIni}). dataFim recebido: ${dataFim}`,
+      );
+    }
+
+    if (horaFim <= horaInicio) {
+      job.log('Nenhuma hora fechada a partir das 06:00 para consolidar.');
+      await job.progress(100);
+
+      return {
+        database: 'DB3 - CONSINCO',
+        tipoEmpresa: 'GIGA',
+        periodo: { inicio: dataIni, fim: dataFim },
+        segmentos: listaSegmentos,
+        registros: [],
+        metodo: 'fila_sequencial',
+        granularidade: 'HORA',
+        faixaHoras,
+      };
+    }
+
+    const consolidado = new Map<number, number>();
+    const totalSegmentos = listaSegmentos.length;
+
+    for (let i = 0; i < totalSegmentos; i++) {
+      const seg = listaSegmentos[i];
+
+      job.log(`[${i + 1}/${totalSegmentos}] Processando segmento ${seg} - GIGA (hora)...`);
+
+      const resultados = await this.db3Client.consultarPorSegmentoPorHora(
+        dataIni,
+        horaInicio,
+        horaFim,
+        seg,
+        'GIGA',
+      );
+
+      resultados.forEach((row: any) => {
+        const hora = Number(row.HORA);
+        const valor = parseFloat(row.VALOR || 0);
+
+        if (!Number.isNaN(hora)) {
+          consolidado.set(hora, (consolidado.get(hora) ?? 0) + valor);
+        }
+      });
+
+      const progress = Math.round(((i + 1) / totalSegmentos) * 90) + 5;
+      await job.progress(progress);
+    }
+
+    const dataBr = this.formatDateBr(dataIni);
+    const registros = [];
+
+    for (let h = horaInicio; h < horaFim; h++) {
+      registros.push({
+        DATA: dataBr,
+        HORA: `${this.pad(h)}:00-${this.pad(h + 1)}:00`,
+        VALOR: consolidado.get(h) ?? 0,
+      });
+    }
+
+    await job.progress(100);
+    job.log(
+      `Concluido GIGA: ${registros.length} faixas horarias, ${totalSegmentos} segmentos processados`,
+    );
+
+    return {
+      database: 'DB3 - CONSINCO',
+      tipoEmpresa: 'GIGA',
+      periodo: { inicio: dataIni, fim: dataFim },
+      segmentos: listaSegmentos,
+      registros,
+      metodo: 'fila_sequencial',
+      granularidade: 'HORA',
+      faixaHoras,
+    };
+  }
+
+  private getFaixaHorariaAtual() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Fortaleza',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+
+    const map = Object.fromEntries(
+      parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+    ) as Record<string, string>;
+
+    const horaAtual = Number(map.hour);
+    const horaInicio = 6;
+    const horaFim = Number.isNaN(horaAtual) ? horaInicio : horaAtual;
+
+    return { horaInicio, horaFim };
+  }
+
+  private formatDateBr(dataIso: string) {
+    const [ano, mes, dia] = dataIso.split('-');
+    return `${dia}/${mes}/${ano}`;
+  }
+
+  private pad(valor: number) {
+    return valor.toString().padStart(2, '0');
   }
 }

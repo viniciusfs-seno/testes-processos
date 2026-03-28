@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Header } from '@nestjs/common';
 import { RelatoriosService } from './relatorios.service';
 import { Db1CnsdResumoDto } from './dto/db1-cnsd-resumo.dto';
 import { Db2VendasResumoDto } from './dto/db2-vendas-resumo.dto';
@@ -9,10 +9,29 @@ import { Db4VendasTotalDto } from './dto/db4-vendas-total.dto';
 import { Db5NfResumoDto } from './dto/db5-nf-resumo.dto';
 import { Db5NfDetalheDto } from './dto/db5-nf-detalhe.dto';
 import { Db5NfTotalDto } from './dto/db5-nf-total.dto';
+import { RelatorioSubidaVendasDto } from './dto/relatorio-subida-vendas.dto';
+import { relatorioSubidaVendasHtml } from './relatorio-subida-vendas.ui';
 
 @Controller('relatorios')
 export class RelatoriosController {
   constructor(private readonly service: RelatoriosService) {}
+
+  // Relatorio Subida de Vendas
+  @Post('relatorio-subida-vendas')
+  async relatorioSubidaVendas(@Body() dto: RelatorioSubidaVendasDto) {
+    return this.service.relatorioSubidaVendas(dto);
+  }
+
+  @Get('relatorio-subida-vendas/ultimo')
+  async ultimoRelatorioSubidaVendas() {
+    return this.service.getUltimoRelatorioSubidaVendas();
+  }
+
+  @Get('relatorio-subida-vendas/ui')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  relatorioSubidaVendasUi() {
+    return relatorioSubidaVendasHtml;
+  }
 
   // ─── DB1 ─────────────────────────────────────────────────────────────────────
   @Post('db1/cnsd-resumo')
