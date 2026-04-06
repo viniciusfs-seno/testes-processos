@@ -95,7 +95,7 @@ export class Db3Processor {
     dataFim: string,
     listaSegmentos: string[],
   ) {
-    const { horaInicio, horaFim } = this.getFaixaHorariaAtual();
+    const { horaInicio, horaFim } = this.getFaixaHorariaAtual(dataIni);
     const faixaHoras = {
       inicio: `${this.pad(horaInicio)}:00`,
       fim: `${this.pad(horaFim)}:00`,
@@ -180,7 +180,17 @@ export class Db3Processor {
     };
   }
 
-  private getFaixaHorariaAtual() {
+  private getFaixaHorariaAtual(dataIso: string) {
+    const todayIso = this.getTodayFortalezaIso();
+
+    if (dataIso < todayIso) {
+      return { horaInicio: 6, horaFim: 24 };
+    }
+
+    if (dataIso > todayIso) {
+      return { horaInicio: 6, horaFim: 6 };
+    }
+
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Fortaleza',
       hour: '2-digit',
@@ -197,6 +207,21 @@ export class Db3Processor {
     const horaFim = Number.isNaN(horaAtual) ? horaInicio : horaAtual;
 
     return { horaInicio, horaFim };
+  }
+
+  private getTodayFortalezaIso() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Fortaleza',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+
+    const map = Object.fromEntries(
+      parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+    ) as Record<string, string>;
+
+    return `${map.year}-${map.month}-${map.day}`;
   }
 
   private formatDateBr(dataIso: string) {

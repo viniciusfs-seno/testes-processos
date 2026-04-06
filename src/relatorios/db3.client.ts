@@ -167,9 +167,22 @@ export class Db3Client {
     });
 
     const pad = (value: number) => value.toString().padStart(2, '0');
+    const addDays = (dateIso: string, days: number) => {
+      const [ano, mes, dia] = dateIso.split('-').map(Number);
+      const base = new Date(ano, mes - 1, dia);
+      base.setDate(base.getDate() + days);
+      const y = base.getFullYear();
+      const m = String(base.getMonth() + 1).padStart(2, '0');
+      const d = String(base.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
 
     try {
       await dataSource.initialize();
+
+      const dataFim =
+        horaFim === 24 ? addDays(dataReferencia, 1) : dataReferencia;
+      const horaFimLabel = horaFim === 24 ? '00:00' : `${pad(horaFim)}:00`;
 
       const query = `
         SELECT 
@@ -219,7 +232,7 @@ export class Db3Client {
           AND DECODE(V.TIPTABELA, 'S', V.CGOACMCOMPRAVENDA, V.ACMCOMPRAVENDA) IN ('S', 'I')
           AND V.CHECKOUT > 0
           AND V.DTAVDA >= TO_DATE(:dataIni || ' ' || :horaInicio, 'YYYY-MM-DD HH24:MI')
-          AND V.DTAVDA < TO_DATE(:dataIni || ' ' || :horaFim, 'YYYY-MM-DD HH24:MI')
+          AND V.DTAVDA < TO_DATE(:dataFim || ' ' || :horaFim, 'YYYY-MM-DD HH24:MI')
         GROUP BY 
           TO_CHAR(V.DTAVDA, 'DD/MM/YYYY'),
           TO_CHAR(V.DTAVDA, 'HH24')
@@ -229,8 +242,9 @@ export class Db3Client {
 
       const params = {
         dataIni: dataReferencia,
+        dataFim,
         horaInicio: `${pad(horaInicio)}:00`,
-        horaFim: `${pad(horaFim)}:00`,
+        horaFim: horaFimLabel,
         segmento,
         tipoEmpresa,
         empresaInicio: faixa.inicio,
