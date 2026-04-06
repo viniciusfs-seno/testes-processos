@@ -3,10 +3,22 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 
 type TipoEmpresaDb3 = 'MERCANTIL' | 'GIGA';
+type OracleBindParams = Record<string, string | number>;
 
 @Injectable()
 export class Db3Client {
   constructor(private readonly configService: ConfigService) {}
+
+  private adicionarUmDia(dataIso: string) {
+    const data = new Date(`${dataIso}T00:00:00`);
+    data.setDate(data.getDate() + 1);
+
+    const ano = data.getFullYear();
+    const mes = String(data.getMonth() + 1).padStart(2, '0');
+    const dia = String(data.getDate()).padStart(2, '0');
+
+    return `${ano}-${mes}-${dia}`;
+  }
 
   private validarPeriodo(dataInicial: string, dataFinal: string) {
     const inicio = new Date(dataInicial);
@@ -40,7 +52,7 @@ export class Db3Client {
     }
 
     if (tipoEmpresa === 'GIGA') {
-      return { inicio: 101, fim: 159 };
+      return { inicio: 101, fim: 199 };
     }
 
     throw new BadRequestException(`Tipo de empresa inválido: ${tipoEmpresa}`);
@@ -125,7 +137,7 @@ export class Db3Client {
           V.DTAVDA
       `;
 
-      const params = {
+      const params: OracleBindParams = {
         dataIni: dataInicial,
         dataFim: dataFinal,
         segmento,
@@ -134,7 +146,7 @@ export class Db3Client {
         empresaFim: faixa.fim,
       };
 
-      const result = await dataSource.query(query, params);
+      const result = await dataSource.query(query, params as unknown as any[]);
       return result;
     } finally {
       if (dataSource.isInitialized) {
@@ -167,22 +179,11 @@ export class Db3Client {
     });
 
     const pad = (value: number) => value.toString().padStart(2, '0');
-    const addDays = (dateIso: string, days: number) => {
-      const [ano, mes, dia] = dateIso.split('-').map(Number);
-      const base = new Date(ano, mes - 1, dia);
-      base.setDate(base.getDate() + days);
-      const y = base.getFullYear();
-      const m = String(base.getMonth() + 1).padStart(2, '0');
-      const d = String(base.getDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    };
+    const dataFimReferencia = horaFim >= 24 ? this.adicionarUmDia(dataReferencia) : dataReferencia;
+    const horaFimTexto = horaFim >= 24 ? '00:00' : `${pad(horaFim)}:00`;
 
     try {
       await dataSource.initialize();
-
-      const dataFim =
-        horaFim === 24 ? addDays(dataReferencia, 1) : dataReferencia;
-      const horaFimLabel = horaFim === 24 ? '00:00' : `${pad(horaFim)}:00`;
 
       const query = `
         SELECT 
@@ -240,18 +241,18 @@ export class Db3Client {
           TO_CHAR(V.DTAVDA, 'HH24')
       `;
 
-      const params = {
+      const params: OracleBindParams = {
         dataIni: dataReferencia,
-        dataFim,
+        dataFim: dataFimReferencia,
         horaInicio: `${pad(horaInicio)}:00`,
-        horaFim: horaFimLabel,
+        horaFim: horaFimTexto,
         segmento,
         tipoEmpresa,
         empresaInicio: faixa.inicio,
         empresaFim: faixa.fim,
       };
 
-      const result = await dataSource.query(query, params);
+      const result = await dataSource.query(query, params as unknown as any[]);
       return result;
     } finally {
       if (dataSource.isInitialized) {

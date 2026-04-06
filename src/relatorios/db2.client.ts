@@ -55,20 +55,16 @@ export class Db2Client {
           ) AS VALOR
         FROM
           EMPORIUM.SALE S,
-          EMPORIUM.SALE_ITEM SI,
-          EMPORIUM.CNSD_STORE_DP_C5 CSDC
+          EMPORIUM.SALE_ITEM SI
         WHERE
           S.STORE_KEY = SI.STORE_KEY AND
           S.POS_NUMBER = SI.POS_NUMBER AND
           S.START_TIME = SI.START_TIME AND
           S.TICKET_NUMBER = SI.TICKET_NUMBER AND
-          S.STORE_KEY = CSDC.STORE_KEY AND
-          S.STORE_KEY > 0 AND
-          S.POS_NUMBER > 0 AND
-          S.TICKET_NUMBER > 0 AND
+          S.STORE_KEY BETWEEN 800 AND 849 AND
           S.SALE_TYPE = 65 AND
-          S.VOIDED = 0
-          AND S.FISCAL_DATE BETWEEN TO_DATE(:dataIni, 'YYYY-MM-DD') AND TO_DATE(:dataFim, 'YYYY-MM-DD')
+          S.VOIDED = 0 AND
+          S.FISCAL_DATE BETWEEN TO_DATE(:1, 'YYYY-MM-DD') AND TO_DATE(:2, 'YYYY-MM-DD')
         GROUP BY
           S.FISCAL_DATE
         ORDER BY

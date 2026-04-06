@@ -115,6 +115,65 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
         transform: translateY(-2px);
       }
 
+      .controls button.secondary {
+        background: #fff;
+        color: var(--accent-3);
+        border: 1px solid rgba(29, 78, 137, 0.18);
+        box-shadow: none;
+      }
+
+      .error-box {
+        border-radius: 12px;
+        padding: 12px;
+        background: rgba(205, 61, 74, 0.08);
+        border: 1px solid rgba(205, 61, 74, 0.18);
+        color: #8f2430;
+        font-size: 13px;
+      }
+
+      .logs-panel {
+        margin-top: 24px;
+        padding: 20px;
+        border-radius: 18px;
+        background: rgba(15, 26, 34, 0.96);
+        color: #e8f0f7;
+        box-shadow: var(--shadow);
+      }
+
+      .logs-panel[hidden] {
+        display: none;
+      }
+
+      .logs-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 14px;
+        margin-top: 16px;
+      }
+
+      .log-card {
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 14px;
+      }
+
+      .log-card h4 {
+        margin: 0 0 8px;
+        font-size: 15px;
+      }
+
+      .log-list {
+        margin: 12px 0 0;
+        padding-left: 18px;
+        color: #d0dce7;
+        font-size: 12px;
+      }
+
+      .log-list li + li {
+        margin-top: 6px;
+      }
+
       .status-bar {
         margin-top: 28px;
         display: flex;
@@ -122,6 +181,66 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
         gap: 12px;
         align-items: center;
         color: var(--muted);
+      }
+
+      .overview {
+        margin-top: 24px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+      }
+
+      .metric {
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba(31, 42, 48, 0.08);
+        border-radius: 16px;
+        padding: 16px;
+        box-shadow: 0 12px 30px rgba(31, 42, 48, 0.08);
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 28px;
+        margin-top: 8px;
+      }
+
+      .result-meta {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 8px;
+        font-size: 13px;
+      }
+
+      .result-chip {
+        border-radius: 12px;
+        padding: 8px 10px;
+        background: rgba(31, 42, 48, 0.05);
+      }
+
+      .result-title {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .preview-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      .preview-table th,
+      .preview-table td {
+        padding: 8px 6px;
+        border-bottom: 1px solid rgba(31, 42, 48, 0.08);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      .preview-wrap {
+        overflow-x: auto;
+        border-radius: 12px;
+        background: rgba(31, 42, 48, 0.03);
+        padding: 8px;
       }
 
       .grid {
@@ -252,14 +371,22 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           <input type="date" id="dataIni" />
           <input type="date" id="dataFim" />
           <button id="btnGerar">Gerar relatorio</button>
+          <button id="btnAtualizar" class="secondary" type="button">Atualizar resultados</button>
+          <button id="btnLogs" class="secondary" type="button">Ver logs do ultimo relatorio</button>
         </div>
       </section>
 
       <div class="status-bar">
         <span id="lastUpdate">Ultima atualizacao: --</span>
         <span id="jobCount">Jobs: 0</span>
+        <span id="refreshMode">Atualizacao automatica: ativa</span>
       </div>
 
+      <section class="overview" id="overview"></section>
+      <section class="logs-panel" id="logsPanel" hidden>
+        <strong>Logs do ultimo relatorio</strong>
+        <div class="logs-grid" id="logsGrid"></div>
+      </section>
       <section class="grid" id="jobs"></section>
       <section id="empty" class="empty" style="display: none;">
         Nenhum relatorio encontrado. Clique em "Gerar relatorio" para criar um novo.
@@ -276,7 +403,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           },
         };
 
-        const state = { last: null, statuses: [] };
+        const state = { last: null, statuses: [], autoRefresh: true, timerId: null };
 
         function byId(id) {
           return document.getElementById(id);
@@ -316,6 +443,322 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           return "Resultado disponivel";
         }
 
+        function isTerminalStatus(status) {
+          return status === "completed" || status === "failed";
+        }
+
+        function allJobsFinished() {
+          return (
+            state.statuses.length > 0 &&
+            state.statuses.every(function (item) {
+              return item && isTerminalStatus(item.status);
+            })
+          );
+        }
+
+        function updateAutoRefreshMode() {
+          const refreshMode = byId("refreshMode");
+          refreshMode.textContent =
+            "Atualizacao automatica: " + (state.autoRefresh ? "ativa" : "pausada");
+        }
+
+        function stopAutoRefresh() {
+          state.autoRefresh = false;
+          if (state.timerId) {
+            clearInterval(state.timerId);
+            state.timerId = null;
+          }
+          updateAutoRefreshMode();
+        }
+
+        function startAutoRefresh() {
+          if (state.timerId) {
+            clearInterval(state.timerId);
+          }
+          state.autoRefresh = true;
+          state.timerId = setInterval(function () {
+            if (state.autoRefresh) {
+              refreshAll();
+            }
+          }, 5000);
+          updateAutoRefreshMode();
+        }
+
+        function formatValue(value) {
+          if (typeof value === "number") {
+            return new Intl.NumberFormat("pt-BR", {
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 2,
+            }).format(value);
+          }
+          if (value === null || value === undefined || value === "") {
+            return "--";
+          }
+          return String(value);
+        }
+
+        function sumNumericField(registros, fieldName) {
+          return registros.reduce(function (total, item) {
+            const value = Number(item && item[fieldName]);
+            return Number.isFinite(value) ? total + value : total;
+          }, 0);
+        }
+
+        function hasNumericField(registros, fieldName) {
+          return (
+            Array.isArray(registros) &&
+            registros.some(function (item) {
+              return Number.isFinite(Number(item && item[fieldName]));
+            })
+          );
+        }
+
+        function detectNumericField(registros) {
+          if (!Array.isArray(registros) || registros.length === 0) return null;
+          const preferredFields = [
+            "TOTALTICKET",
+            "TOTALITENS",
+            "TOTALFISCAL",
+            "VALOR",
+            "TOTAL",
+            "VLRTOTAL",
+            "VALOR_TOTAL"
+          ];
+          for (const field of preferredFields) {
+            if (registros.some(function (item) { return Number.isFinite(Number(item && item[field])); })) {
+              return field;
+            }
+          }
+          const first = registros[0];
+          if (!first || typeof first !== "object") return null;
+          return Object.keys(first).find(function (key) {
+            return registros.some(function (item) {
+              return Number.isFinite(Number(item && item[key]));
+            });
+          }) || null;
+        }
+
+        function buildResultMeta(status) {
+          if (!status || !status.result) {
+            return "<div class=\\"result-chip\\">Sem resultado disponivel ainda</div>";
+          }
+
+          const result = status.result;
+          const registros = Array.isArray(result.registros) ? result.registros : [];
+          const numericField = detectNumericField(registros);
+          const total = numericField ? sumNumericField(registros, numericField) : null;
+          const segmentos = Array.isArray(result.segmentos) ? result.segmentos.length : null;
+          const faixaHoras =
+            result.faixaHoras && result.faixaHoras.inicio && result.faixaHoras.fim
+              ? result.faixaHoras.inicio + " ate " + result.faixaHoras.fim
+              : null;
+          const totalDia =
+            result && Number.isFinite(Number(result.totalDia)) ? Number(result.totalDia) : null;
+
+          const chips = [];
+          chips.push(
+            "<div class=\\"result-chip\\"><div class=\\"result-title\\">Registros</div><strong>" +
+              formatValue(registros.length) +
+              "</strong></div>"
+          );
+
+          if (hasNumericField(registros, "TOTALTICKET")) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Total Ticket</div><strong>" +
+                formatValue(sumNumericField(registros, "TOTALTICKET")) +
+                "</strong></div>"
+            );
+          }
+
+          if (hasNumericField(registros, "TOTALITENS")) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Total Itens</div><strong>" +
+                formatValue(sumNumericField(registros, "TOTALITENS")) +
+                "</strong></div>"
+            );
+          }
+
+          if (hasNumericField(registros, "TOTALFISCAL")) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Total Fiscal</div><strong>" +
+                formatValue(sumNumericField(registros, "TOTALFISCAL")) +
+                "</strong></div>"
+            );
+          }
+
+          if (
+            total !== null &&
+            numericField !== "TOTALTICKET" &&
+            numericField !== "TOTALITENS" &&
+            numericField !== "TOTALFISCAL"
+          ) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Total " +
+                escapeHtml(numericField) +
+                "</div><strong>" +
+                formatValue(total) +
+                "</strong></div>"
+            );
+          }
+
+          if (segmentos !== null) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Segmentos</div><strong>" +
+                formatValue(segmentos) +
+                "</strong></div>"
+            );
+          }
+
+          if (totalDia !== null) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Total do Dia</div><strong>" +
+                formatValue(totalDia) +
+                "</strong></div>"
+            );
+          }
+
+          if (status.duracaoFormatada) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Duracao</div><strong>" +
+                escapeHtml(status.duracaoFormatada) +
+                "</strong></div>"
+            );
+          }
+
+          if (faixaHoras) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Faixa</div><strong>" +
+                escapeHtml(faixaHoras) +
+                "</strong></div>"
+            );
+          }
+
+          return chips.join("");
+        }
+
+        function buildPreviewTable(status) {
+          if (!status || !status.result || !Array.isArray(status.result.registros)) {
+            return "";
+          }
+
+          const registros = status.result.registros;
+          if (registros.length === 0) {
+            return "<div class=\\"mono\\">Nenhum registro retornado.</div>";
+          }
+
+          const columns = Object.keys(registros[0]).slice(0, 4);
+          const rows = registros.slice(0, 5);
+
+          return (
+            "<div class=\\"preview-wrap\\"><table class=\\"preview-table\\"><thead><tr>" +
+            columns
+              .map(function (column) {
+                return "<th>" + escapeHtml(column) + "</th>";
+              })
+              .join("") +
+            "</tr></thead><tbody>" +
+            rows
+              .map(function (row) {
+                return (
+                  "<tr>" +
+                  columns
+                    .map(function (column) {
+                      return "<td>" + escapeHtml(formatValue(row[column])) + "</td>";
+                    })
+                    .join("") +
+                  "</tr>"
+                );
+              })
+              .join("") +
+            "</tbody></table></div>"
+          );
+        }
+
+        function renderOverview() {
+          const overview = byId("overview");
+          if (!state.last) {
+            overview.innerHTML = "";
+            return;
+          }
+
+          const completed = state.statuses.filter(function (item) {
+            return item && item.status === "completed";
+          }).length;
+          const failed = state.statuses.filter(function (item) {
+            return item && item.status === "failed";
+          }).length;
+          const active = state.statuses.filter(function (item) {
+            return item && !isTerminalStatus(item.status);
+          }).length;
+          const totalRegistros = state.statuses.reduce(function (acc, item) {
+            const registros =
+              item && item.result && Array.isArray(item.result.registros)
+                ? item.result.registros.length
+                : 0;
+            return acc + registros;
+          }, 0);
+
+          overview.innerHTML =
+            "<article class=\\"metric\\"><div>Concluidos</div><strong>" +
+            completed +
+            "</strong></article>" +
+            "<article class=\\"metric\\"><div>Em andamento</div><strong>" +
+            active +
+            "</strong></article>" +
+            "<article class=\\"metric\\"><div>Falharam</div><strong>" +
+            failed +
+            "</strong></article>" +
+            "<article class=\\"metric\\"><div>Registros retornados</div><strong>" +
+            totalRegistros +
+            "</strong></article>";
+        }
+
+        function renderLogsPanel() {
+          const logsPanel = byId("logsPanel");
+          const logsGrid = byId("logsGrid");
+
+          if (!state.last || state.statuses.length === 0) {
+            logsGrid.innerHTML = "";
+            return;
+          }
+
+          logsGrid.innerHTML = state.last.jobs
+            .map(function (job, index) {
+              const status = state.statuses[index] || {};
+              const failedReason = status.failedReason
+                ? "<div class=\\"error-box\\">" + escapeHtml(status.failedReason) + "</div>"
+                : "";
+              const logs = Array.isArray(status.logs) && status.logs.length > 0
+                ? "<ul class=\\"log-list\\">" +
+                  status.logs
+                    .map(function (line) {
+                      return "<li>" + escapeHtml(line) + "</li>";
+                    })
+                    .join("") +
+                  "</ul>"
+                : "<div class=\\"mono\\">Sem logs disponiveis.</div>";
+
+              return (
+                "<article class=\\"log-card\\">" +
+                "<h4>" + escapeHtml(job.nome) + "</h4>" +
+                "<div class=\\"mono\\">Status: " + escapeHtml(status.status || "aguardando") + "</div>" +
+                failedReason +
+                logs +
+                "</article>"
+              );
+            })
+            .join("");
+        }
+
+        function toggleLogsPanel() {
+          const logsPanel = byId("logsPanel");
+          if (logsPanel.hasAttribute("hidden")) {
+            logsPanel.removeAttribute("hidden");
+          } else {
+            logsPanel.setAttribute("hidden", "");
+          }
+        }
+
         async function fetchJson(url, options) {
           const res = await fetch(url, options);
           if (!res.ok) return null;
@@ -349,6 +792,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           const jobCount = byId("jobCount");
           const jobsEl = byId("jobs");
           const emptyEl = byId("empty");
+          const logsPanel = byId("logsPanel");
 
           jobsEl.innerHTML = "";
 
@@ -357,6 +801,8 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             metaPeriod.textContent = "Periodo: --";
             jobCount.textContent = "Jobs: 0";
             emptyEl.style.display = "block";
+            logsPanel.setAttribute("hidden", "");
+            renderOverview();
             return;
           }
 
@@ -366,11 +812,18 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             "Periodo: " + state.last.dataIni + " ate " + state.last.dataFim;
           jobCount.textContent = "Jobs: " + state.last.jobs.length;
           lastUpdate.textContent = "Ultima atualizacao: " + new Date().toLocaleTimeString();
+          renderOverview();
+          renderLogsPanel();
 
           state.last.jobs.forEach(function (job, index) {
             const status = state.statuses[index] || {};
             const badgeClass = statusClass(status.status);
             const summary = buildSummary(status.result);
+            const resultMeta = buildResultMeta(status);
+            const previewTable = buildPreviewTable(status);
+            const failedReason = status.failedReason
+              ? "<div class=\\"error-box\\">" + escapeHtml(status.failedReason) + "</div>"
+              : "";
 
             const card = document.createElement("article");
             card.className = "card";
@@ -392,6 +845,11 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
               "<div>" +
               summary +
               "</div>" +
+              "<div class=\\"result-meta\\">" +
+              resultMeta +
+              "</div>" +
+              failedReason +
+              previewTable +
               "<details><summary>Ver JSON</summary><pre>" +
               escapeHtml(JSON.stringify(status, null, 2)) +
               "</pre></details>";
@@ -407,6 +865,9 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             return;
           }
           await loadStatuses(last.jobs);
+          if (allJobsFinished()) {
+            stopAutoRefresh();
+          }
           render();
         }
 
@@ -425,6 +886,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           });
 
           if (res.ok) {
+            startAutoRefresh();
             await refreshAll();
           } else {
             alert("Falha ao gerar relatorio.");
@@ -434,9 +896,12 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
         byId("dataIni").value = formatNow();
         byId("dataFim").value = formatNow();
         byId("btnGerar").addEventListener("click", triggerReport);
+        byId("btnAtualizar").addEventListener("click", refreshAll);
+        byId("btnLogs").addEventListener("click", toggleLogsPanel);
 
+        updateAutoRefreshMode();
         refreshAll();
-        setInterval(refreshAll, 5000);
+        startAutoRefresh();
       })();
     </script>
   </body>

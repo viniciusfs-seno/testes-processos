@@ -40,6 +40,11 @@ export class Db4Client {
 
   async vendasResumo(dataInicial: string, dataFinal: string, cdLoja: number = 0) {
     this.validarPeriodo(dataInicial, dataFinal);
+
+    if (cdLoja === 0) {
+      return this.vendasTotal(dataInicial, dataFinal);
+    }
+
     const dataSource = this.createDataSource();
 
     try {

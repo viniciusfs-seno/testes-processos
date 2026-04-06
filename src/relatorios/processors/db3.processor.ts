@@ -3,6 +3,22 @@ import type { Job } from 'bull';
 import { Db3Client } from '../db3.client';
 
 type TipoEmpresaDb3 = 'MERCANTIL' | 'GIGA';
+type RegistroHoraDb3 = {
+  DATA: string;
+  HORA: string;
+  VALOR: number;
+};
+type ResultadoGigaDb3 = {
+  database: string;
+  tipoEmpresa: 'GIGA';
+  periodo: { inicio: string; fim: string };
+  segmentos: string[];
+  registros: RegistroHoraDb3[];
+  totalDia: number;
+  metodo: 'fila_sequencial';
+  granularidade: 'HORA' | 'FAIXA';
+  faixaHoras: { inicio: string; fim: string };
+};
 
 @Processor('db3-relatorios')
 export class Db3Processor {
@@ -94,11 +110,11 @@ export class Db3Processor {
     dataIni: string,
     dataFim: string,
     listaSegmentos: string[],
-  ) {
-    const { horaInicio, horaFim } = this.getFaixaHorariaAtual(dataIni);
+  ): Promise<ResultadoGigaDb3> {
+    const { horaInicio, horaFim, faixaFimLabel } = this.getFaixaHorariaConsulta(dataIni);
     const faixaHoras = {
       inicio: `${this.pad(horaInicio)}:00`,
-      fim: `${this.pad(horaFim)}:00`,
+      fim: faixaFimLabel,
     };
 
     if (dataIni !== dataFim) {
@@ -117,10 +133,16 @@ export class Db3Processor {
         periodo: { inicio: dataIni, fim: dataFim },
         segmentos: listaSegmentos,
         registros: [],
+        totalDia: 0,
         metodo: 'fila_sequencial',
-        granularidade: 'HORA',
+        granularidade: 'FAIXA',
         faixaHoras,
       };
+    }
+
+    if (this.isDataAnteriorHoje(dataIni)) {
+      job.log('Data anterior a hoje: usando consolidado do dia inteiro para GIGA.');
+      return this.consolidarGigaPorFaixa(job, dataIni, dataFim, listaSegmentos, faixaHoras);
     }
 
     const consolidado = new Map<number, number>();
@@ -153,14 +175,24 @@ export class Db3Processor {
     }
 
     const dataBr = this.formatDateBr(dataIni);
-    const registros = [];
+    const registros: RegistroHoraDb3[] = [];
 
     for (let h = horaInicio; h < horaFim; h++) {
+      const horaFimFaixa =
+        h === 23 && horaFim === 24 ? '23:59' : `${this.pad(h + 1)}:00`;
+
       registros.push({
         DATA: dataBr,
-        HORA: `${this.pad(h)}:00-${this.pad(h + 1)}:00`,
+        HORA: `${this.pad(h)}:00-${horaFimFaixa}`,
         VALOR: consolidado.get(h) ?? 0,
       });
+    }
+
+    const totalDia = registros.reduce((total, registro) => total + registro.VALOR, 0);
+
+    if (totalDia === 0) {
+      job.log('Consulta horaria do GIGA retornou zero. Aplicando fallback para consolidado do dia.');
+      return this.consolidarGigaPorFaixa(job, dataIni, dataFim, listaSegmentos, faixaHoras);
     }
 
     await job.progress(100);
@@ -174,39 +206,69 @@ export class Db3Processor {
       periodo: { inicio: dataIni, fim: dataFim },
       segmentos: listaSegmentos,
       registros,
+      totalDia,
       metodo: 'fila_sequencial',
       granularidade: 'HORA',
       faixaHoras,
     };
   }
 
-  private getFaixaHorariaAtual(dataIso: string) {
-    const todayIso = this.getTodayFortalezaIso();
+  private async consolidarGigaPorFaixa(
+    job: Job,
+    dataIni: string,
+    dataFim: string,
+    listaSegmentos: string[],
+    faixaHoras: { inicio: string; fim: string },
+  ): Promise<ResultadoGigaDb3> {
+    const consolidado = new Map<string, number>();
+    const totalSegmentos = listaSegmentos.length;
 
-    if (dataIso < todayIso) {
-      return { horaInicio: 6, horaFim: 24 };
+    for (let i = 0; i < totalSegmentos; i++) {
+      const seg = listaSegmentos[i];
+
+      job.log(`[${i + 1}/${totalSegmentos}] Processando segmento ${seg} - GIGA (faixa)...`);
+
+      const resultados = await this.db3Client.consultarPorSegmento(
+        dataIni,
+        dataFim,
+        seg,
+        'GIGA',
+      );
+
+      resultados.forEach((row: any) => {
+        const data = row.DATA;
+        const valor = parseFloat(row.VALOR || 0);
+        consolidado.set(data, (consolidado.get(data) ?? 0) + valor);
+      });
+
+      const progress = Math.round(((i + 1) / totalSegmentos) * 90) + 5;
+      await job.progress(progress);
     }
 
-    if (dataIso > todayIso) {
-      return { horaInicio: 6, horaFim: 6 };
-    }
+    const dataBr = this.formatDateBr(dataIni);
+    const totalDia = Array.from(consolidado.values()).reduce((total, valor) => total + valor, 0);
+    const registros: RegistroHoraDb3[] = [
+      {
+        DATA: dataBr,
+        HORA: `${faixaHoras.inicio}-${faixaHoras.fim}`,
+        VALOR: totalDia,
+      },
+    ];
 
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Fortaleza',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).formatToParts(new Date());
+    await job.progress(100);
+    job.log(`Concluido GIGA em faixa unica: total do dia ${totalDia.toFixed(2)}`);
 
-    const map = Object.fromEntries(
-      parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
-    ) as Record<string, string>;
-
-    const horaAtual = Number(map.hour);
-    const horaInicio = 6;
-    const horaFim = Number.isNaN(horaAtual) ? horaInicio : horaAtual;
-
-    return { horaInicio, horaFim };
+    return {
+      database: 'DB3 - CONSINCO',
+      tipoEmpresa: 'GIGA',
+      periodo: { inicio: dataIni, fim: dataFim },
+      segmentos: listaSegmentos,
+      registros,
+      totalDia,
+      metodo: 'fila_sequencial',
+      granularidade: 'FAIXA',
+      faixaHoras,
+    };
   }
 
   private getTodayFortalezaIso() {
@@ -222,6 +284,55 @@ export class Db3Processor {
     ) as Record<string, string>;
 
     return `${map.year}-${map.month}-${map.day}`;
+  }
+
+  private getHoraAtualFortaleza() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Fortaleza',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+
+    const map = Object.fromEntries(
+      parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+    ) as Record<string, string>;
+
+    return Number(map.hour);
+  }
+
+  private getFaixaHorariaConsulta(dataReferencia: string) {
+    const horaInicio = 6;
+    const hoje = this.getTodayFortalezaIso();
+
+    if (dataReferencia < hoje) {
+      return {
+        horaInicio,
+        horaFim: 24,
+        faixaFimLabel: '23:59',
+      };
+    }
+
+    if (dataReferencia > hoje) {
+      return {
+        horaInicio,
+        horaFim: horaInicio,
+        faixaFimLabel: `${this.pad(horaInicio)}:00`,
+      };
+    }
+
+    const horaAtual = this.getHoraAtualFortaleza();
+    const horaFim = Number.isNaN(horaAtual) ? horaInicio : horaAtual;
+
+    return {
+      horaInicio,
+      horaFim,
+      faixaFimLabel: `${this.pad(horaFim)}:00`,
+    };
+  }
+
+  private isDataAnteriorHoje(dataReferencia: string) {
+    return dataReferencia < this.getTodayFortalezaIso();
   }
 
   private formatDateBr(dataIso: string) {
