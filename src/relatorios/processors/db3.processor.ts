@@ -16,7 +16,7 @@ type ResultadoGigaDb3 = {
   registros: RegistroHoraDb3[];
   totalDia: number;
   metodo: 'fila_sequencial';
-  granularidade: 'HORA' | 'FAIXA';
+  granularidade: 'HORA';
   faixaHoras: { inicio: string; fim: string };
 };
 
@@ -135,14 +135,9 @@ export class Db3Processor {
         registros: [],
         totalDia: 0,
         metodo: 'fila_sequencial',
-        granularidade: 'FAIXA',
+        granularidade: 'HORA',
         faixaHoras,
       };
-    }
-
-    if (this.isDataAnteriorHoje(dataIni)) {
-      job.log('Data anterior a hoje: usando consolidado do dia inteiro para GIGA.');
-      return this.consolidarGigaPorFaixa(job, dataIni, dataFim, listaSegmentos, faixaHoras);
     }
 
     const consolidado = new Map<number, number>();
@@ -190,11 +185,6 @@ export class Db3Processor {
 
     const totalDia = registros.reduce((total, registro) => total + registro.VALOR, 0);
 
-    if (totalDia === 0) {
-      job.log('Consulta horaria do GIGA retornou zero. Aplicando fallback para consolidado do dia.');
-      return this.consolidarGigaPorFaixa(job, dataIni, dataFim, listaSegmentos, faixaHoras);
-    }
-
     await job.progress(100);
     job.log(
       `Concluido GIGA: ${registros.length} faixas horarias, ${totalSegmentos} segmentos processados`,
@@ -209,64 +199,6 @@ export class Db3Processor {
       totalDia,
       metodo: 'fila_sequencial',
       granularidade: 'HORA',
-      faixaHoras,
-    };
-  }
-
-  private async consolidarGigaPorFaixa(
-    job: Job,
-    dataIni: string,
-    dataFim: string,
-    listaSegmentos: string[],
-    faixaHoras: { inicio: string; fim: string },
-  ): Promise<ResultadoGigaDb3> {
-    const consolidado = new Map<string, number>();
-    const totalSegmentos = listaSegmentos.length;
-
-    for (let i = 0; i < totalSegmentos; i++) {
-      const seg = listaSegmentos[i];
-
-      job.log(`[${i + 1}/${totalSegmentos}] Processando segmento ${seg} - GIGA (faixa)...`);
-
-      const resultados = await this.db3Client.consultarPorSegmento(
-        dataIni,
-        dataFim,
-        seg,
-        'GIGA',
-      );
-
-      resultados.forEach((row: any) => {
-        const data = row.DATA;
-        const valor = parseFloat(row.VALOR || 0);
-        consolidado.set(data, (consolidado.get(data) ?? 0) + valor);
-      });
-
-      const progress = Math.round(((i + 1) / totalSegmentos) * 90) + 5;
-      await job.progress(progress);
-    }
-
-    const dataBr = this.formatDateBr(dataIni);
-    const totalDia = Array.from(consolidado.values()).reduce((total, valor) => total + valor, 0);
-    const registros: RegistroHoraDb3[] = [
-      {
-        DATA: dataBr,
-        HORA: `${faixaHoras.inicio}-${faixaHoras.fim}`,
-        VALOR: totalDia,
-      },
-    ];
-
-    await job.progress(100);
-    job.log(`Concluido GIGA em faixa unica: total do dia ${totalDia.toFixed(2)}`);
-
-    return {
-      database: 'DB3 - CONSINCO',
-      tipoEmpresa: 'GIGA',
-      periodo: { inicio: dataIni, fim: dataFim },
-      segmentos: listaSegmentos,
-      registros,
-      totalDia,
-      metodo: 'fila_sequencial',
-      granularidade: 'FAIXA',
       faixaHoras,
     };
   }
@@ -329,10 +261,6 @@ export class Db3Processor {
       horaFim,
       faixaFimLabel: `${this.pad(horaFim)}:00`,
     };
-  }
-
-  private isDataAnteriorHoje(dataReferencia: string) {
-    return dataReferencia < this.getTodayFortalezaIso();
   }
 
   private formatDateBr(dataIso: string) {
