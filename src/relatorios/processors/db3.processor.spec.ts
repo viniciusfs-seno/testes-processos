@@ -49,10 +49,10 @@ describe('Db3Processor', () => {
     };
   }
 
-  it('retorna todas as faixas horarias para dia anterior ate 23:59', async () => {
+  it('retorna faixas a partir da primeira hora com venda para dia anterior ate 23:59', async () => {
     jest.spyOn(processor as any, 'getTodayFortalezaIso').mockReturnValue('2026-04-06');
     db3Client.consultarPorSegmentosPorHora.mockResolvedValue([
-      { HORA: '06', VALOR: 10 },
+      { HORA: '05', VALOR: 7 },
       { HORA: '08', VALOR: 30 },
     ]);
 
@@ -67,29 +67,31 @@ describe('Db3Processor', () => {
 
     expect(db3Client.consultarPorSegmentosPorHora).toHaveBeenCalledWith(
       '2026-04-05',
-      6,
+      0,
       24,
       ['51'],
       'GIGA',
     );
     expect(result.granularidade).toBe('HORA');
-    expect(result.registros).toHaveLength(18);
+    expect(result.registros).toHaveLength(19);
     expect(result.registros[0]).toEqual({
       DATA: '05/04/2026',
-      HORA: '06:00-07:00',
-      VALOR: 10,
+      HORA: '05:00-06:00',
+      VALOR: 7,
     });
     expect(result.registros[1]).toEqual({
       DATA: '05/04/2026',
-      HORA: '07:00-08:00',
+      HORA: '06:00-07:00',
       VALOR: 0,
     });
-    expect(result.registros[17]).toEqual({
+    expect(result.registros[18]).toEqual({
       DATA: '05/04/2026',
       HORA: '23:00-23:59',
       VALOR: 0,
     });
-    expect(result.totalDia).toBe(40);
+    expect(result.totalDia).toBe(37);
+    expect(result.criterioEmpresas).toBe('cadastro_giga_ativo');
+    expect(result.criterioValor).toBe('vlritemsemdesc_menos_vlrdevolitemsemdesc');
     expect(result.lojas).toEqual([
       { codigo: 101, nome: 'GIGA LIMAO', nomeReduzido: 'G01-LIMAO' },
     ]);
@@ -98,11 +100,11 @@ describe('Db3Processor', () => {
     ]);
   });
 
-  it('retorna apenas horas fechadas para o dia atual', async () => {
+  it('retorna a ultima faixa aberta para o dia atual', async () => {
     jest.spyOn(processor as any, 'getTodayFortalezaIso').mockReturnValue('2026-04-06');
-    jest.spyOn(processor as any, 'getHoraAtualFortaleza').mockReturnValue(10);
+    jest.spyOn(processor as any, 'getHoraAtualFortaleza').mockReturnValue(9);
     db3Client.consultarPorSegmentosPorHora.mockResolvedValue([
-      { HORA: '06', VALOR: 15 },
+      { HORA: '05', VALOR: 4 },
       { HORA: '09', VALOR: 20 },
     ]);
 
@@ -115,14 +117,24 @@ describe('Db3Processor', () => {
 
     const result = await processor.handleVendasResumo(job as any);
 
+    expect(db3Client.consultarPorSegmentosPorHora).toHaveBeenCalledWith(
+      '2026-04-06',
+      0,
+      10,
+      ['51'],
+      'GIGA',
+    );
     expect(result.registros.map((registro) => registro.HORA)).toEqual([
+      '05:00-06:00',
       '06:00-07:00',
       '07:00-08:00',
       '08:00-09:00',
       '09:00-10:00',
     ]);
-    expect(result.registros.map((registro) => registro.VALOR)).toEqual([15, 0, 0, 20]);
-    expect(result.totalDia).toBe(35);
+    expect(result.registros.map((registro) => registro.VALOR)).toEqual([4, 0, 0, 0, 20]);
+    expect(result.totalDia).toBe(24);
+    expect(result.criterioEmpresas).toBe('cadastro_giga_ativo');
+    expect(result.criterioValor).toBe('vlritemsemdesc_menos_vlrdevolitemsemdesc');
   });
 
   it('mantem faixas zeradas quando a consulta horaria retorna total zero', async () => {
@@ -139,15 +151,11 @@ describe('Db3Processor', () => {
 
     const result = await processor.handleVendasResumo(job as any);
 
-    expect(result.registros).toEqual([
-      { DATA: '06/04/2026', HORA: '06:00-07:00', VALOR: 0 },
-      { DATA: '06/04/2026', HORA: '07:00-08:00', VALOR: 0 },
-      { DATA: '06/04/2026', HORA: '08:00-09:00', VALOR: 0 },
-    ]);
+    expect(result.registros).toEqual([]);
     expect(result.totalDia).toBe(0);
-    expect(job.log).not.toHaveBeenCalledWith(
-      expect.stringContaining('Aplicando fallback para consolidado do dia'),
-    );
+    expect(result.criterioEmpresas).toBe('cadastro_giga_ativo');
+    expect(result.criterioValor).toBe('vlritemsemdesc_menos_vlrdevolitemsemdesc');
+    expect(job.log).toHaveBeenCalledWith('Nenhuma venda encontrada no intervalo consultado.');
   });
 
   it('usa apenas dataIni e registra aviso quando dataFim for diferente', async () => {
@@ -165,7 +173,7 @@ describe('Db3Processor', () => {
 
     expect(db3Client.consultarPorSegmentosPorHora).toHaveBeenCalledWith(
       '2026-04-05',
-      6,
+      0,
       24,
       ['51'],
       'GIGA',
@@ -175,9 +183,10 @@ describe('Db3Processor', () => {
     );
   });
 
-  it('retorna vazio quando ainda nao existe hora fechada a partir das 06:00', async () => {
+  it('retorna vazio quando ainda nao existe venda no dia atual', async () => {
     jest.spyOn(processor as any, 'getTodayFortalezaIso').mockReturnValue('2026-04-06');
-    jest.spyOn(processor as any, 'getHoraAtualFortaleza').mockReturnValue(6);
+    jest.spyOn(processor as any, 'getHoraAtualFortaleza').mockReturnValue(9);
+    db3Client.consultarPorSegmentosPorHora.mockResolvedValue([]);
 
     const job = createJob({
       dataIni: '2026-04-06',
@@ -188,9 +197,17 @@ describe('Db3Processor', () => {
 
     const result = await processor.handleVendasResumo(job as any);
 
-    expect(db3Client.consultarPorSegmentosPorHora).not.toHaveBeenCalled();
+    expect(db3Client.consultarPorSegmentosPorHora).toHaveBeenCalledWith(
+      '2026-04-06',
+      0,
+      10,
+      ['51'],
+      'GIGA',
+    );
     expect(result.granularidade).toBe('HORA');
     expect(result.registros).toEqual([]);
     expect(result.totalDia).toBe(0);
+    expect(result.criterioEmpresas).toBe('cadastro_giga_ativo');
+    expect(result.criterioValor).toBe('vlritemsemdesc_menos_vlrdevolitemsemdesc');
   });
 });

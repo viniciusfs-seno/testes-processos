@@ -23,6 +23,8 @@ type ResultadoGigaDb3 = {
   tipoEmpresa: 'GIGA';
   periodo: { inicio: string; fim: string };
   segmentos: string[];
+  criterioEmpresas: 'cadastro_giga_ativo';
+  criterioValor: 'vlritemsemdesc_menos_vlrdevolitemsemdesc';
   segmentosDetalhados: SegmentoGigaDb3[];
   lojas: LojaGigaDb3[];
   registros: RegistroHoraDb3[];
@@ -127,11 +129,8 @@ export class Db3Processor {
     dataFim: string,
     listaSegmentos: string[],
   ): Promise<ResultadoGigaDb3> {
-    const { horaInicio, horaFim, faixaFimLabel } = this.getFaixaHorariaConsulta(dataIni);
-    const faixaHoras = {
-      inicio: `${this.pad(horaInicio)}:00`,
-      fim: faixaFimLabel,
-    };
+    const { horaInicioConsulta, horaFimConsulta, faixaFimLabel } =
+      this.getFaixaHorariaConsulta(dataIni);
 
     if (dataIni !== dataFim) {
       job.log(
@@ -144,25 +143,6 @@ export class Db3Processor {
       this.listarSegmentosGiga(listaSegmentos),
     ]);
 
-    if (horaFim <= horaInicio) {
-      job.log('Nenhuma hora fechada a partir das 06:00 para consolidar.');
-      await job.progress(100);
-
-      return {
-        database: 'DB3 - CONSINCO',
-        tipoEmpresa: 'GIGA',
-        periodo: { inicio: dataIni, fim: dataFim },
-        segmentos: listaSegmentos,
-        segmentosDetalhados,
-        lojas,
-        registros: [],
-        totalDia: 0,
-        metodo: 'consulta_unica',
-        granularidade: 'HORA',
-        faixaHoras,
-      };
-    }
-
     const consolidado = new Map<number, number>();
     const totalSegmentos = listaSegmentos.length;
     job.log(
@@ -172,8 +152,8 @@ export class Db3Processor {
 
     const resultados = await this.db3Client.consultarPorSegmentosPorHora(
       dataIni,
-      horaInicio,
-      horaFim,
+      horaInicioConsulta,
+      horaFimConsulta,
       listaSegmentos,
       'GIGA',
     );
@@ -190,15 +170,45 @@ export class Db3Processor {
     await job.progress(90);
 
     const dataBr = this.formatDateBr(dataIni);
+    const horasComVenda = Array.from(consolidado.keys()).sort((a, b) => a - b);
+    const horaInicioFaixa =
+      horasComVenda.length > 0 ? horasComVenda[0] : horaInicioConsulta;
+    const horaFimFaixa = Math.max(horaInicioFaixa, horaFimConsulta);
+    const faixaHoras = {
+      inicio: `${this.pad(horaInicioFaixa)}:00`,
+      fim: faixaFimLabel,
+    };
+
+    if (horasComVenda.length === 0) {
+      job.log('Nenhuma venda encontrada no intervalo consultado.');
+      await job.progress(100);
+
+      return {
+        database: 'DB3 - CONSINCO',
+        tipoEmpresa: 'GIGA',
+        periodo: { inicio: dataIni, fim: dataFim },
+        segmentos: listaSegmentos,
+        criterioEmpresas: 'cadastro_giga_ativo',
+        criterioValor: 'vlritemsemdesc_menos_vlrdevolitemsemdesc',
+        segmentosDetalhados,
+        lojas,
+        registros: [],
+        totalDia: 0,
+        metodo: 'consulta_unica',
+        granularidade: 'HORA',
+        faixaHoras,
+      };
+    }
+
     const registros: RegistroHoraDb3[] = [];
 
-    for (let h = horaInicio; h < horaFim; h++) {
-      const horaFimFaixa =
-        h === 23 && horaFim === 24 ? '23:59' : `${this.pad(h + 1)}:00`;
+    for (let h = horaInicioFaixa; h < horaFimFaixa; h++) {
+      const horaFimLabel =
+        h === 23 && horaFimFaixa === 24 ? '23:59' : `${this.pad(h + 1)}:00`;
 
       registros.push({
         DATA: dataBr,
-        HORA: `${this.pad(h)}:00-${horaFimFaixa}`,
+        HORA: `${this.pad(h)}:00-${horaFimLabel}`,
         VALOR: consolidado.get(h) ?? 0,
       });
     }
@@ -215,6 +225,8 @@ export class Db3Processor {
       tipoEmpresa: 'GIGA',
       periodo: { inicio: dataIni, fim: dataFim },
       segmentos: listaSegmentos,
+      criterioEmpresas: 'cadastro_giga_ativo',
+      criterioValor: 'vlritemsemdesc_menos_vlrdevolitemsemdesc',
       segmentosDetalhados,
       lojas,
       registros,
@@ -256,32 +268,31 @@ export class Db3Processor {
   }
 
   private getFaixaHorariaConsulta(dataReferencia: string) {
-    const horaInicio = 6;
     const hoje = this.getTodayFortalezaIso();
 
     if (dataReferencia < hoje) {
       return {
-        horaInicio,
-        horaFim: 24,
+        horaInicioConsulta: 0,
+        horaFimConsulta: 24,
         faixaFimLabel: '23:59',
       };
     }
 
     if (dataReferencia > hoje) {
       return {
-        horaInicio,
-        horaFim: horaInicio,
-        faixaFimLabel: `${this.pad(horaInicio)}:00`,
+        horaInicioConsulta: 0,
+        horaFimConsulta: 0,
+        faixaFimLabel: '00:00',
       };
     }
 
     const horaAtual = this.getHoraAtualFortaleza();
-    const horaFim = Number.isNaN(horaAtual) ? horaInicio : horaAtual;
+    const horaFimConsulta = Number.isNaN(horaAtual) ? 0 : Math.min(horaAtual + 1, 24);
 
     return {
-      horaInicio,
-      horaFim,
-      faixaFimLabel: `${this.pad(horaFim)}:00`,
+      horaInicioConsulta: 0,
+      horaFimConsulta,
+      faixaFimLabel: horaFimConsulta === 24 ? '23:59' : `${this.pad(horaFimConsulta)}:00`,
     };
   }
 

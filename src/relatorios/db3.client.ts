@@ -58,7 +58,7 @@ export class Db3Client {
 
   private validarSegmentos(segmentos: string[]) {
     if (!Array.isArray(segmentos) || segmentos.length === 0) {
-      throw new BadRequestException('Informe ao menos um segmento vÃ¡lido.');
+      throw new BadRequestException('Informe ao menos um segmento válido.');
     }
 
     segmentos.forEach((segmento) => this.validarSegmento(segmento));
@@ -69,11 +69,44 @@ export class Db3Client {
       return { inicio: 800, fim: 849 };
     }
 
+    throw new BadRequestException(`Tipo de empresa inválido: ${tipoEmpresa}`);
+  }
+
+  private getValorExpr(tipoEmpresa: TipoEmpresaDb3) {
     if (tipoEmpresa === 'GIGA') {
-      return { inicio: 101, fim: 159 };
+      return `ROUND(NVL(V.VLRITEMSEMDESC, 0), 2) - ROUND(NVL(V.VLRDEVOLITEMSEMDESC, 0), 2)`;
     }
 
-    throw new BadRequestException(`Tipo de empresa inválido: ${tipoEmpresa}`);
+    return `ROUND(V.VLRITEM, 2) - (ROUND(V.VLRDEVOLITEM, 2) - 0)`;
+  }
+
+  private getFiltroEmpresaSql(tipoEmpresa: TipoEmpresaDb3) {
+    if (tipoEmpresa === 'GIGA') {
+      return `
+        V.NROEMPRESA IN (
+          SELECT E2.NROEMPRESA
+          FROM MAX_EMPRESA E2
+          WHERE E2.STATUS = 'A'
+            AND UPPER(COALESCE(E2.FANTASIA, E2.NOMEREDUZIDO, E2.RAZAOSOCIAL)) LIKE '%GIGA%'
+        )
+      `;
+    }
+
+    return `V.NROEMPRESA BETWEEN :empresaInicio AND :empresaFim`;
+  }
+
+  private createDataSource() {
+    return new DataSource({
+      type: 'oracle',
+      host: this.configService.get<string>('DB3_HOST'),
+      port: Number(this.configService.get<string>('DB3_PORT')),
+      username: this.configService.get<string>('DB3_USER'),
+      password: this.configService.get<string>('DB3_PASS'),
+      serviceName: this.configService.get<string>('DB3_SERVICE_NAME'),
+      extra: {
+        connectTimeout: 60000,
+      },
+    });
   }
 
   async consultarPorSegmento(
@@ -85,19 +118,10 @@ export class Db3Client {
     this.validarPeriodo(dataInicial, dataFinal);
     this.validarSegmento(segmento);
 
-    const faixa = this.obterFaixaEmpresa(tipoEmpresa);
-
-    const dataSource = new DataSource({
-      type: 'oracle',
-      host: this.configService.get<string>('DB3_HOST'),
-      port: Number(this.configService.get<string>('DB3_PORT')),
-      username: this.configService.get<string>('DB3_USER'),
-      password: this.configService.get<string>('DB3_PASS'),
-      serviceName: this.configService.get<string>('DB3_SERVICE_NAME'),
-      extra: {
-        connectTimeout: 60000,
-      },
-    });
+    const faixa = tipoEmpresa === 'MERCANTIL' ? this.obterFaixaEmpresa(tipoEmpresa) : null;
+    const valorExpr = this.getValorExpr(tipoEmpresa);
+    const filtroEmpresaSql = this.getFiltroEmpresaSql(tipoEmpresa);
+    const dataSource = this.createDataSource();
 
     try {
       await dataSource.initialize();
@@ -107,9 +131,7 @@ export class Db3Client {
           TO_CHAR(V.DTAVDA, 'DD/MM/YYYY') AS DATA,
           :segmento AS SEGMENTO,
           :tipoEmpresa AS TIPO_EMPRESA,
-          SUM(
-            ROUND(V.VLRITEM, 2) - (ROUND(V.VLRDEVOLITEM, 2) - 0)
-          ) AS VALOR
+          SUM(${valorExpr}) AS VALOR
         FROM 
           MRL_CUSTODIAFAM Y,
           MAXV_ABCDISTRIBBASE V,
@@ -144,7 +166,7 @@ export class Db3Client {
           AND V.CHECKOUT = PD.NROCHECKOUT
           AND V.NRODOCTO = PD.NUMERODF
           AND V.NROSEGMENTO = :segmento
-          AND V.NROEMPRESA BETWEEN :empresaInicio AND :empresaFim
+          AND ${filtroEmpresaSql}
           AND K.QTDEMBALAGEM = 1
           AND DECODE(V.TIPTABELA, 'S', V.CGOACMCOMPRAVENDA, V.ACMCOMPRAVENDA) IN ('S', 'I')
           AND V.CHECKOUT > 0
@@ -160,12 +182,15 @@ export class Db3Client {
         dataFim: dataFinal,
         segmento,
         tipoEmpresa,
-        empresaInicio: faixa.inicio,
-        empresaFim: faixa.fim,
+        ...(faixa
+          ? {
+              empresaInicio: faixa.inicio,
+              empresaFim: faixa.fim,
+            }
+          : {}),
       };
 
-      const result = await dataSource.query(query, params as unknown as any[]);
-      return result;
+      return await dataSource.query(query, params as unknown as any[]);
     } finally {
       if (dataSource.isInitialized) {
         await dataSource.destroy();
@@ -183,18 +208,10 @@ export class Db3Client {
     this.validarPeriodo(dataReferencia, dataReferencia);
     this.validarSegmento(segmento);
 
-    const faixa = this.obterFaixaEmpresa(tipoEmpresa);
-    const dataSource = new DataSource({
-      type: 'oracle',
-      host: this.configService.get<string>('DB3_HOST'),
-      port: Number(this.configService.get<string>('DB3_PORT')),
-      username: this.configService.get<string>('DB3_USER'),
-      password: this.configService.get<string>('DB3_PASS'),
-      serviceName: this.configService.get<string>('DB3_SERVICE_NAME'),
-      extra: {
-        connectTimeout: 60000,
-      },
-    });
+    const faixa = tipoEmpresa === 'MERCANTIL' ? this.obterFaixaEmpresa(tipoEmpresa) : null;
+    const valorExpr = this.getValorExpr(tipoEmpresa);
+    const filtroEmpresaSql = this.getFiltroEmpresaSql(tipoEmpresa);
+    const dataSource = this.createDataSource();
 
     const pad = (value: number) => value.toString().padStart(2, '0');
     const dataFimReferencia = horaFim >= 24 ? this.adicionarUmDia(dataReferencia) : dataReferencia;
@@ -211,9 +228,7 @@ export class Db3Client {
           TO_CHAR(${dataHoraVendaExpr}, 'HH24') AS HORA,
           :segmento AS SEGMENTO,
           :tipoEmpresa AS TIPO_EMPRESA,
-          SUM(
-            ROUND(V.VLRITEM, 2) - (ROUND(V.VLRDEVOLITEM, 2) - 0)
-          ) AS VALOR
+          SUM(${valorExpr}) AS VALOR
         FROM 
           MRL_CUSTODIAFAM Y,
           MAXV_ABCDISTRIBBASE V,
@@ -248,7 +263,7 @@ export class Db3Client {
           AND V.CHECKOUT = PD.NROCHECKOUT
           AND V.NRODOCTO = PD.NUMERODF
           AND V.NROSEGMENTO = :segmento
-          AND V.NROEMPRESA BETWEEN :empresaInicio AND :empresaFim
+          AND ${filtroEmpresaSql}
           AND K.QTDEMBALAGEM = 1
           AND DECODE(V.TIPTABELA, 'S', V.CGOACMCOMPRAVENDA, V.ACMCOMPRAVENDA) IN ('S', 'I')
           AND V.CHECKOUT > 0
@@ -268,12 +283,15 @@ export class Db3Client {
         horaFim: horaFimTexto,
         segmento,
         tipoEmpresa,
-        empresaInicio: faixa.inicio,
-        empresaFim: faixa.fim,
+        ...(faixa
+          ? {
+              empresaInicio: faixa.inicio,
+              empresaFim: faixa.fim,
+            }
+          : {}),
       };
 
-      const result = await dataSource.query(query, params as unknown as any[]);
-      return result;
+      return await dataSource.query(query, params as unknown as any[]);
     } finally {
       if (dataSource.isInitialized) {
         await dataSource.destroy();
@@ -291,18 +309,10 @@ export class Db3Client {
     this.validarPeriodo(dataReferencia, dataReferencia);
     this.validarSegmentos(segmentos);
 
-    const faixa = this.obterFaixaEmpresa(tipoEmpresa);
-    const dataSource = new DataSource({
-      type: 'oracle',
-      host: this.configService.get<string>('DB3_HOST'),
-      port: Number(this.configService.get<string>('DB3_PORT')),
-      username: this.configService.get<string>('DB3_USER'),
-      password: this.configService.get<string>('DB3_PASS'),
-      serviceName: this.configService.get<string>('DB3_SERVICE_NAME'),
-      extra: {
-        connectTimeout: 60000,
-      },
-    });
+    const faixa = tipoEmpresa === 'MERCANTIL' ? this.obterFaixaEmpresa(tipoEmpresa) : null;
+    const valorExpr = this.getValorExpr(tipoEmpresa);
+    const filtroEmpresaSql = this.getFiltroEmpresaSql(tipoEmpresa);
+    const dataSource = this.createDataSource();
 
     const pad = (value: number) => value.toString().padStart(2, '0');
     const dataFimReferencia = horaFim >= 24 ? this.adicionarUmDia(dataReferencia) : dataReferencia;
@@ -319,9 +329,7 @@ export class Db3Client {
           TO_CHAR(V.DTAVDA, 'DD/MM/YYYY') AS DATA,
           TO_CHAR(${dataHoraVendaExpr}, 'HH24') AS HORA,
           :tipoEmpresa AS TIPO_EMPRESA,
-          SUM(
-            ROUND(V.VLRITEM, 2) - (ROUND(V.VLRDEVOLITEM, 2) - 0)
-          ) AS VALOR
+          SUM(${valorExpr}) AS VALOR
         FROM 
           MRL_CUSTODIAFAM Y,
           MAXV_ABCDISTRIBBASE V,
@@ -356,7 +364,7 @@ export class Db3Client {
           AND V.CHECKOUT = PD.NROCHECKOUT
           AND V.NRODOCTO = PD.NUMERODF
           AND V.NROSEGMENTO IN (${segmentosSql})
-          AND V.NROEMPRESA BETWEEN :empresaInicio AND :empresaFim
+          AND ${filtroEmpresaSql}
           AND K.QTDEMBALAGEM = 1
           AND DECODE(V.TIPTABELA, 'S', V.CGOACMCOMPRAVENDA, V.ACMCOMPRAVENDA) IN ('S', 'I')
           AND V.CHECKOUT > 0
@@ -378,12 +386,15 @@ export class Db3Client {
         horaInicio: `${pad(horaInicio)}:00`,
         horaFim: horaFimTexto,
         tipoEmpresa,
-        empresaInicio: faixa.inicio,
-        empresaFim: faixa.fim,
+        ...(faixa
+          ? {
+              empresaInicio: faixa.inicio,
+              empresaFim: faixa.fim,
+            }
+          : {}),
       };
 
-      const result = await dataSource.query(query, params as unknown as any[]);
-      return result;
+      return await dataSource.query(query, params as unknown as any[]);
     } finally {
       if (dataSource.isInitialized) {
         await dataSource.destroy();
@@ -392,42 +403,42 @@ export class Db3Client {
   }
 
   async listarEmpresasPorFaixa(tipoEmpresa: TipoEmpresaDb3): Promise<EmpresaDb3[]> {
-    const faixa = this.obterFaixaEmpresa(tipoEmpresa);
-
-    const dataSource = new DataSource({
-      type: 'oracle',
-      host: this.configService.get<string>('DB3_HOST'),
-      port: Number(this.configService.get<string>('DB3_PORT')),
-      username: this.configService.get<string>('DB3_USER'),
-      password: this.configService.get<string>('DB3_PASS'),
-      serviceName: this.configService.get<string>('DB3_SERVICE_NAME'),
-      extra: {
-        connectTimeout: 60000,
-      },
-    });
+    const faixa = tipoEmpresa === 'MERCANTIL' ? this.obterFaixaEmpresa(tipoEmpresa) : null;
+    const dataSource = this.createDataSource();
 
     try {
       await dataSource.initialize();
 
-      const query = `
-        SELECT
-          E.NROEMPRESA AS CODIGO,
-          COALESCE(E.FANTASIA, E.NOMEREDUZIDO, E.RAZAOSOCIAL) AS NOME,
-          E.NOMEREDUZIDO AS NOME_REDUZIDO
-        FROM MAX_EMPRESA E
-        WHERE E.NROEMPRESA BETWEEN :empresaInicio AND :empresaFim
-        ORDER BY E.NROEMPRESA
-      `;
+      const query =
+        tipoEmpresa === 'GIGA'
+          ? `
+              SELECT
+                E.NROEMPRESA AS CODIGO,
+                COALESCE(E.FANTASIA, E.NOMEREDUZIDO, E.RAZAOSOCIAL) AS NOME,
+                E.NOMEREDUZIDO AS NOME_REDUZIDO
+              FROM MAX_EMPRESA E
+              WHERE E.STATUS = 'A'
+                AND UPPER(COALESCE(E.FANTASIA, E.NOMEREDUZIDO, E.RAZAOSOCIAL)) LIKE '%GIGA%'
+              ORDER BY E.NROEMPRESA
+            `
+          : `
+              SELECT
+                E.NROEMPRESA AS CODIGO,
+                COALESCE(E.FANTASIA, E.NOMEREDUZIDO, E.RAZAOSOCIAL) AS NOME,
+                E.NOMEREDUZIDO AS NOME_REDUZIDO
+              FROM MAX_EMPRESA E
+              WHERE E.NROEMPRESA BETWEEN :empresaInicio AND :empresaFim
+              ORDER BY E.NROEMPRESA
+            `;
 
-      const result = await dataSource.query(
-        query,
-        {
-          empresaInicio: faixa.inicio,
-          empresaFim: faixa.fim,
-        } as unknown as any[],
-      );
+      const params = faixa
+        ? ({
+            empresaInicio: faixa.inicio,
+            empresaFim: faixa.fim,
+          } as unknown as any[])
+        : [];
 
-      return result;
+      return await dataSource.query(query, params);
     } finally {
       if (dataSource.isInitialized) {
         await dataSource.destroy();
@@ -438,18 +449,7 @@ export class Db3Client {
   async listarSegmentosDetalhados(segmentos: string[]): Promise<SegmentoDb3[]> {
     this.validarSegmentos(segmentos);
 
-    const dataSource = new DataSource({
-      type: 'oracle',
-      host: this.configService.get<string>('DB3_HOST'),
-      port: Number(this.configService.get<string>('DB3_PORT')),
-      username: this.configService.get<string>('DB3_USER'),
-      password: this.configService.get<string>('DB3_PASS'),
-      serviceName: this.configService.get<string>('DB3_SERVICE_NAME'),
-      extra: {
-        connectTimeout: 60000,
-      },
-    });
-
+    const dataSource = this.createDataSource();
     const segmentosSql = segmentos.map((segmento) => Number(segmento)).join(', ');
 
     try {
@@ -465,8 +465,7 @@ export class Db3Client {
         ORDER BY S.NROSEGMENTO
       `;
 
-      const result = await dataSource.query(query);
-      return result;
+      return await dataSource.query(query);
     } finally {
       if (dataSource.isInitialized) {
         await dataSource.destroy();
