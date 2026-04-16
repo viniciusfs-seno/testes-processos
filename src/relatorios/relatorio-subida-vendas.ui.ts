@@ -222,6 +222,34 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
         color: var(--muted);
       }
 
+      .progress-block {
+        display: grid;
+        gap: 6px;
+      }
+
+      .progress-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .progress-track {
+        width: 100%;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(31, 42, 48, 0.1);
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, var(--accent-3), var(--accent-2));
+        transition: width 0.25s ease;
+      }
+
       .preview-table {
         width: 100%;
         border-collapse: collapse;
@@ -371,6 +399,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           <input type="date" id="dataIni" />
           <input type="date" id="dataFim" />
           <button id="btnGerar">Gerar relatorio</button>
+          <button id="btnGerarGiga" type="button">Puxar so GIGA</button>
           <button id="btnAtualizar" class="secondary" type="button">Atualizar resultados</button>
           <button id="btnLogs" class="secondary" type="button">Ver logs do ultimo relatorio</button>
         </div>
@@ -398,6 +427,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
         const api = {
           last: "/relatorios/relatorio-subida-vendas/ultimo",
           start: "/relatorios/relatorio-subida-vendas",
+          startGiga: "/relatorios/relatorio-subida-vendas/giga",
           status: function (queue, id) {
             return "/relatorios/job/" + queue + "/" + id;
           },
@@ -441,6 +471,29 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             return "Registros: " + result.registros.length;
           }
           return "Resultado disponivel";
+        }
+
+        function normalizeProgress(status) {
+          if (!status) return 0;
+          const progress = Number(status.progress);
+          if (Number.isFinite(progress)) {
+            return Math.max(0, Math.min(100, progress));
+          }
+          if (status.status === "completed") return 100;
+          return 0;
+        }
+
+        function buildProgressBar(status) {
+          const percent = normalizeProgress(status);
+          return (
+            "<div class=\\"progress-block\\">" +
+            "<div class=\\"progress-head\\"><span>Progresso</span><strong>" +
+            escapeHtml(formatValue(percent)) +
+            "%</strong></div>" +
+            "<div class=\\"progress-track\\"><div class=\\"progress-fill\\" style=\\"width:" +
+            percent +
+            "%\\"></div></div></div>"
+          );
         }
 
         function isTerminalStatus(status) {
@@ -548,6 +601,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           const numericField = detectNumericField(registros);
           const total = numericField ? sumNumericField(registros, numericField) : null;
           const segmentos = Array.isArray(result.segmentos) ? result.segmentos.length : null;
+          const lojas = Array.isArray(result.lojas) ? result.lojas.length : null;
           const faixaHoras =
             result.faixaHoras && result.faixaHoras.inicio && result.faixaHoras.fim
               ? result.faixaHoras.inicio + " ate " + result.faixaHoras.fim
@@ -609,6 +663,14 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             );
           }
 
+          if (lojas !== null) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Lojas</div><strong>" +
+                formatValue(lojas) +
+                "</strong></div>"
+            );
+          }
+
           if (totalDia !== null) {
             chips.push(
               "<div class=\\"result-chip\\"><div class=\\"result-title\\">Total do Dia</div><strong>" +
@@ -647,7 +709,10 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           }
 
           const columns = Object.keys(registros[0]).slice(0, 4);
-          const rows = registros.slice(0, 5);
+          const rows =
+            status.result && status.result.granularidade === "HORA"
+              ? registros
+              : registros.slice(0, 5);
 
           return (
             "<div class=\\"preview-wrap\\"><table class=\\"preview-table\\"><thead><tr>" +
@@ -820,6 +885,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             const badgeClass = statusClass(status.status);
             const summary = buildSummary(status.result);
             const resultMeta = buildResultMeta(status);
+            const progressBar = buildProgressBar(status);
             const previewTable = buildPreviewTable(status);
             const failedReason = status.failedReason
               ? "<div class=\\"error-box\\">" + escapeHtml(status.failedReason) + "</div>"
@@ -842,6 +908,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
               "<div class=\\"mono\\">Job: " +
               job.jobId +
               "</div>" +
+              progressBar +
               "<div>" +
               summary +
               "</div>" +
@@ -871,7 +938,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           render();
         }
 
-        async function triggerReport() {
+        async function triggerReport(url) {
           const dataIni = byId("dataIni").value;
           const dataFim = byId("dataFim").value;
 
@@ -879,7 +946,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           if (dataIni) payload.dataIni = dataIni;
           if (dataFim) payload.dataFim = dataFim;
 
-          const res = await fetch(api.start, {
+          const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -895,7 +962,12 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
 
         byId("dataIni").value = formatNow();
         byId("dataFim").value = formatNow();
-        byId("btnGerar").addEventListener("click", triggerReport);
+        byId("btnGerar").addEventListener("click", function () {
+          return triggerReport(api.start);
+        });
+        byId("btnGerarGiga").addEventListener("click", function () {
+          return triggerReport(api.startGiga);
+        });
         byId("btnAtualizar").addEventListener("click", refreshAll);
         byId("btnLogs").addEventListener("click", toggleLogsPanel);
 

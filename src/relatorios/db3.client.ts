@@ -4,6 +4,16 @@ import { DataSource } from 'typeorm';
 
 type TipoEmpresaDb3 = 'MERCANTIL' | 'GIGA';
 type OracleBindParams = Record<string, string | number>;
+type EmpresaDb3 = {
+  CODIGO: number;
+  NOME: string;
+  NOME_REDUZIDO: string | null;
+};
+type SegmentoDb3 = {
+  CODIGO: number;
+  DESCRICAO: string;
+  STATUS: string | null;
+};
 
 @Injectable()
 export class Db3Client {
@@ -46,13 +56,21 @@ export class Db3Client {
     }
   }
 
+  private validarSegmentos(segmentos: string[]) {
+    if (!Array.isArray(segmentos) || segmentos.length === 0) {
+      throw new BadRequestException('Informe ao menos um segmento vÃ¡lido.');
+    }
+
+    segmentos.forEach((segmento) => this.validarSegmento(segmento));
+  }
+
   private obterFaixaEmpresa(tipoEmpresa: TipoEmpresaDb3) {
     if (tipoEmpresa === 'MERCANTIL') {
       return { inicio: 800, fim: 849 };
     }
 
     if (tipoEmpresa === 'GIGA') {
-      return { inicio: 101, fim: 199 };
+      return { inicio: 101, fim: 159 };
     }
 
     throw new BadRequestException(`Tipo de empresa inválido: ${tipoEmpresa}`);
@@ -185,10 +203,12 @@ export class Db3Client {
     try {
       await dataSource.initialize();
 
+      const dataHoraVendaExpr = `NVL(V.DTAHORLANCTO, PD.DTAHORAMOVTO)`;
+
       const query = `
         SELECT 
           TO_CHAR(V.DTAVDA, 'DD/MM/YYYY') AS DATA,
-          TO_CHAR(V.DTAVDA, 'HH24') AS HORA,
+          TO_CHAR(${dataHoraVendaExpr}, 'HH24') AS HORA,
           :segmento AS SEGMENTO,
           :tipoEmpresa AS TIPO_EMPRESA,
           SUM(
@@ -232,13 +252,13 @@ export class Db3Client {
           AND K.QTDEMBALAGEM = 1
           AND DECODE(V.TIPTABELA, 'S', V.CGOACMCOMPRAVENDA, V.ACMCOMPRAVENDA) IN ('S', 'I')
           AND V.CHECKOUT > 0
-          AND V.DTAVDA >= TO_DATE(:dataIni || ' ' || :horaInicio, 'YYYY-MM-DD HH24:MI')
-          AND V.DTAVDA < TO_DATE(:dataFim || ' ' || :horaFim, 'YYYY-MM-DD HH24:MI')
+          AND ${dataHoraVendaExpr} >= TO_DATE(:dataIni || ' ' || :horaInicio, 'YYYY-MM-DD HH24:MI')
+          AND ${dataHoraVendaExpr} < TO_DATE(:dataFim || ' ' || :horaFim, 'YYYY-MM-DD HH24:MI')
         GROUP BY 
           TO_CHAR(V.DTAVDA, 'DD/MM/YYYY'),
-          TO_CHAR(V.DTAVDA, 'HH24')
+          TO_CHAR(${dataHoraVendaExpr}, 'HH24')
         ORDER BY
-          TO_CHAR(V.DTAVDA, 'HH24')
+          TO_CHAR(${dataHoraVendaExpr}, 'HH24')
       `;
 
       const params: OracleBindParams = {
@@ -253,6 +273,199 @@ export class Db3Client {
       };
 
       const result = await dataSource.query(query, params as unknown as any[]);
+      return result;
+    } finally {
+      if (dataSource.isInitialized) {
+        await dataSource.destroy();
+      }
+    }
+  }
+
+  async consultarPorSegmentosPorHora(
+    dataReferencia: string,
+    horaInicio: number,
+    horaFim: number,
+    segmentos: string[],
+    tipoEmpresa: TipoEmpresaDb3,
+  ): Promise<any[]> {
+    this.validarPeriodo(dataReferencia, dataReferencia);
+    this.validarSegmentos(segmentos);
+
+    const faixa = this.obterFaixaEmpresa(tipoEmpresa);
+    const dataSource = new DataSource({
+      type: 'oracle',
+      host: this.configService.get<string>('DB3_HOST'),
+      port: Number(this.configService.get<string>('DB3_PORT')),
+      username: this.configService.get<string>('DB3_USER'),
+      password: this.configService.get<string>('DB3_PASS'),
+      serviceName: this.configService.get<string>('DB3_SERVICE_NAME'),
+      extra: {
+        connectTimeout: 60000,
+      },
+    });
+
+    const pad = (value: number) => value.toString().padStart(2, '0');
+    const dataFimReferencia = horaFim >= 24 ? this.adicionarUmDia(dataReferencia) : dataReferencia;
+    const dataFimDiaExclusiva = this.adicionarUmDia(dataReferencia);
+    const horaFimTexto = horaFim >= 24 ? '00:00' : `${pad(horaFim)}:00`;
+    const dataHoraVendaExpr = `NVL(V.DTAHORLANCTO, PD.DTAHORAMOVTO)`;
+    const segmentosSql = segmentos.map((segmento) => Number(segmento)).join(', ');
+
+    try {
+      await dataSource.initialize();
+
+      const query = `
+        SELECT 
+          TO_CHAR(V.DTAVDA, 'DD/MM/YYYY') AS DATA,
+          TO_CHAR(${dataHoraVendaExpr}, 'HH24') AS HORA,
+          :tipoEmpresa AS TIPO_EMPRESA,
+          SUM(
+            ROUND(V.VLRITEM, 2) - (ROUND(V.VLRDEVOLITEM, 2) - 0)
+          ) AS VALOR
+        FROM 
+          MRL_CUSTODIAFAM Y,
+          MAXV_ABCDISTRIBBASE V,
+          MAP_PRODUTO A,
+          MAP_PRODUTO PB,
+          MAP_FAMDIVISAO D,
+          MAP_FAMEMBALAGEM K,
+          MAX_EMPRESA E,
+          MAX_DIVISAO DV,
+          MAP_PRODACRESCCUSTORELAC PR,
+          MAP_FAMILIA FAM,
+          MAX_CODGERALOPER G2,
+          PDV_DOCTO PD
+        WHERE 
+          D.SEQFAMILIA = A.SEQFAMILIA
+          AND D.NRODIVISAO = V.NRODIVISAO
+          AND V.SEQPRODUTO = A.SEQPRODUTO
+          AND V.SEQPRODUTOCUSTO = PB.SEQPRODUTO
+          AND V.NRODIVISAO = D.NRODIVISAO
+          AND E.NROEMPRESA = V.NROEMPRESA
+          AND E.NRODIVISAO = DV.NRODIVISAO
+          AND V.SEQPRODUTO = PR.SEQPRODUTO(+)
+          AND V.DTAVDA = PR.DTAMOVIMENTACAO(+)
+          AND Y.NROEMPRESA = NVL(E.NROEMPCUSTOABC, E.NROEMPRESA)
+          AND Y.DTAENTRADASAIDA = V.DTAVDA
+          AND K.SEQFAMILIA = A.SEQFAMILIA
+          AND Y.SEQFAMILIA = PB.SEQFAMILIA
+          AND FAM.SEQFAMILIA = A.SEQFAMILIA
+          AND V.CODGERALOPER = G2.CODGERALOPER
+          AND V.NROEMPRESA = PD.NROEMPRESA
+          AND V.DTAVDA = PD.DTAMOVIMENTO
+          AND V.CHECKOUT = PD.NROCHECKOUT
+          AND V.NRODOCTO = PD.NUMERODF
+          AND V.NROSEGMENTO IN (${segmentosSql})
+          AND V.NROEMPRESA BETWEEN :empresaInicio AND :empresaFim
+          AND K.QTDEMBALAGEM = 1
+          AND DECODE(V.TIPTABELA, 'S', V.CGOACMCOMPRAVENDA, V.ACMCOMPRAVENDA) IN ('S', 'I')
+          AND V.CHECKOUT > 0
+          AND V.DTAVDA >= TO_DATE(:dataIni, 'YYYY-MM-DD')
+          AND V.DTAVDA < TO_DATE(:dataFimDia, 'YYYY-MM-DD')
+          AND ${dataHoraVendaExpr} >= TO_DATE(:dataIni || ' ' || :horaInicio, 'YYYY-MM-DD HH24:MI')
+          AND ${dataHoraVendaExpr} < TO_DATE(:dataHoraFim || ' ' || :horaFim, 'YYYY-MM-DD HH24:MI')
+        GROUP BY 
+          TO_CHAR(V.DTAVDA, 'DD/MM/YYYY'),
+          TO_CHAR(${dataHoraVendaExpr}, 'HH24')
+        ORDER BY
+          TO_CHAR(${dataHoraVendaExpr}, 'HH24')
+      `;
+
+      const params: OracleBindParams = {
+        dataIni: dataReferencia,
+        dataFimDia: dataFimDiaExclusiva,
+        dataHoraFim: dataFimReferencia,
+        horaInicio: `${pad(horaInicio)}:00`,
+        horaFim: horaFimTexto,
+        tipoEmpresa,
+        empresaInicio: faixa.inicio,
+        empresaFim: faixa.fim,
+      };
+
+      const result = await dataSource.query(query, params as unknown as any[]);
+      return result;
+    } finally {
+      if (dataSource.isInitialized) {
+        await dataSource.destroy();
+      }
+    }
+  }
+
+  async listarEmpresasPorFaixa(tipoEmpresa: TipoEmpresaDb3): Promise<EmpresaDb3[]> {
+    const faixa = this.obterFaixaEmpresa(tipoEmpresa);
+
+    const dataSource = new DataSource({
+      type: 'oracle',
+      host: this.configService.get<string>('DB3_HOST'),
+      port: Number(this.configService.get<string>('DB3_PORT')),
+      username: this.configService.get<string>('DB3_USER'),
+      password: this.configService.get<string>('DB3_PASS'),
+      serviceName: this.configService.get<string>('DB3_SERVICE_NAME'),
+      extra: {
+        connectTimeout: 60000,
+      },
+    });
+
+    try {
+      await dataSource.initialize();
+
+      const query = `
+        SELECT
+          E.NROEMPRESA AS CODIGO,
+          COALESCE(E.FANTASIA, E.NOMEREDUZIDO, E.RAZAOSOCIAL) AS NOME,
+          E.NOMEREDUZIDO AS NOME_REDUZIDO
+        FROM MAX_EMPRESA E
+        WHERE E.NROEMPRESA BETWEEN :empresaInicio AND :empresaFim
+        ORDER BY E.NROEMPRESA
+      `;
+
+      const result = await dataSource.query(
+        query,
+        {
+          empresaInicio: faixa.inicio,
+          empresaFim: faixa.fim,
+        } as unknown as any[],
+      );
+
+      return result;
+    } finally {
+      if (dataSource.isInitialized) {
+        await dataSource.destroy();
+      }
+    }
+  }
+
+  async listarSegmentosDetalhados(segmentos: string[]): Promise<SegmentoDb3[]> {
+    this.validarSegmentos(segmentos);
+
+    const dataSource = new DataSource({
+      type: 'oracle',
+      host: this.configService.get<string>('DB3_HOST'),
+      port: Number(this.configService.get<string>('DB3_PORT')),
+      username: this.configService.get<string>('DB3_USER'),
+      password: this.configService.get<string>('DB3_PASS'),
+      serviceName: this.configService.get<string>('DB3_SERVICE_NAME'),
+      extra: {
+        connectTimeout: 60000,
+      },
+    });
+
+    const segmentosSql = segmentos.map((segmento) => Number(segmento)).join(', ');
+
+    try {
+      await dataSource.initialize();
+
+      const query = `
+        SELECT
+          S.NROSEGMENTO AS CODIGO,
+          S.DESCSEGMENTO AS DESCRICAO,
+          S.STATUS
+        FROM VPALM_SEGMENTO S
+        WHERE S.NROSEGMENTO IN (${segmentosSql})
+        ORDER BY S.NROSEGMENTO
+      `;
+
+      const result = await dataSource.query(query);
       return result;
     } finally {
       if (dataSource.isInitialized) {

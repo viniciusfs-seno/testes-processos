@@ -22,6 +22,11 @@ export class RelatoriosController {
     return this.service.relatorioSubidaVendas(dto);
   }
 
+  @Post('relatorio-subida-vendas/giga')
+  async relatorioSubidaVendasGiga(@Body() dto: RelatorioSubidaVendasDto) {
+    return this.service.relatorioSubidaVendasGiga(dto);
+  }
+
   @Get('relatorio-subida-vendas/ultimo')
   async ultimoRelatorioSubidaVendas() {
     return this.service.getUltimoRelatorioSubidaVendas();

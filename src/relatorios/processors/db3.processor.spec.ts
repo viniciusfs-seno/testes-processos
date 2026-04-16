@@ -14,12 +14,28 @@ type MockJob = {
 
 describe('Db3Processor', () => {
   let processor: Db3Processor;
-  let db3Client: jest.Mocked<Pick<Db3Client, 'consultarPorSegmento' | 'consultarPorSegmentoPorHora'>>;
+  let db3Client: jest.Mocked<
+    Pick<
+      Db3Client,
+      | 'consultarPorSegmento'
+      | 'consultarPorSegmentoPorHora'
+      | 'consultarPorSegmentosPorHora'
+      | 'listarEmpresasPorFaixa'
+      | 'listarSegmentosDetalhados'
+    >
+  >;
 
   beforeEach(() => {
     db3Client = {
       consultarPorSegmento: jest.fn(),
       consultarPorSegmentoPorHora: jest.fn(),
+      consultarPorSegmentosPorHora: jest.fn(),
+      listarEmpresasPorFaixa: jest.fn().mockResolvedValue([
+        { CODIGO: 101, NOME: 'GIGA LIMAO', NOME_REDUZIDO: 'G01-LIMAO' },
+      ]),
+      listarSegmentosDetalhados: jest.fn().mockResolvedValue([
+        { CODIGO: 51, DESCRICAO: 'MA-ATACADO BA', STATUS: 'A' },
+      ]),
     };
 
     processor = new Db3Processor(db3Client as unknown as Db3Client);
@@ -35,7 +51,7 @@ describe('Db3Processor', () => {
 
   it('retorna todas as faixas horarias para dia anterior ate 23:59', async () => {
     jest.spyOn(processor as any, 'getTodayFortalezaIso').mockReturnValue('2026-04-06');
-    db3Client.consultarPorSegmentoPorHora.mockResolvedValue([
+    db3Client.consultarPorSegmentosPorHora.mockResolvedValue([
       { HORA: '06', VALOR: 10 },
       { HORA: '08', VALOR: 30 },
     ]);
@@ -49,11 +65,11 @@ describe('Db3Processor', () => {
 
     const result = await processor.handleVendasResumo(job as any);
 
-    expect(db3Client.consultarPorSegmentoPorHora).toHaveBeenCalledWith(
+    expect(db3Client.consultarPorSegmentosPorHora).toHaveBeenCalledWith(
       '2026-04-05',
       6,
       24,
-      '51',
+      ['51'],
       'GIGA',
     );
     expect(result.granularidade).toBe('HORA');
@@ -74,12 +90,18 @@ describe('Db3Processor', () => {
       VALOR: 0,
     });
     expect(result.totalDia).toBe(40);
+    expect(result.lojas).toEqual([
+      { codigo: 101, nome: 'GIGA LIMAO', nomeReduzido: 'G01-LIMAO' },
+    ]);
+    expect(result.segmentosDetalhados).toEqual([
+      { codigo: 51, descricao: 'MA-ATACADO BA', status: 'A' },
+    ]);
   });
 
   it('retorna apenas horas fechadas para o dia atual', async () => {
     jest.spyOn(processor as any, 'getTodayFortalezaIso').mockReturnValue('2026-04-06');
     jest.spyOn(processor as any, 'getHoraAtualFortaleza').mockReturnValue(10);
-    db3Client.consultarPorSegmentoPorHora.mockResolvedValue([
+    db3Client.consultarPorSegmentosPorHora.mockResolvedValue([
       { HORA: '06', VALOR: 15 },
       { HORA: '09', VALOR: 20 },
     ]);
@@ -106,7 +128,7 @@ describe('Db3Processor', () => {
   it('mantem faixas zeradas quando a consulta horaria retorna total zero', async () => {
     jest.spyOn(processor as any, 'getTodayFortalezaIso').mockReturnValue('2026-04-06');
     jest.spyOn(processor as any, 'getHoraAtualFortaleza').mockReturnValue(9);
-    db3Client.consultarPorSegmentoPorHora.mockResolvedValue([]);
+    db3Client.consultarPorSegmentosPorHora.mockResolvedValue([]);
 
     const job = createJob({
       dataIni: '2026-04-06',
@@ -130,7 +152,7 @@ describe('Db3Processor', () => {
 
   it('usa apenas dataIni e registra aviso quando dataFim for diferente', async () => {
     jest.spyOn(processor as any, 'getTodayFortalezaIso').mockReturnValue('2026-04-06');
-    db3Client.consultarPorSegmentoPorHora.mockResolvedValue([]);
+    db3Client.consultarPorSegmentosPorHora.mockResolvedValue([]);
 
     const job = createJob({
       dataIni: '2026-04-05',
@@ -141,11 +163,11 @@ describe('Db3Processor', () => {
 
     await processor.handleVendasResumo(job as any);
 
-    expect(db3Client.consultarPorSegmentoPorHora).toHaveBeenCalledWith(
+    expect(db3Client.consultarPorSegmentosPorHora).toHaveBeenCalledWith(
       '2026-04-05',
       6,
       24,
-      '51',
+      ['51'],
       'GIGA',
     );
     expect(job.log).toHaveBeenCalledWith(
@@ -166,7 +188,7 @@ describe('Db3Processor', () => {
 
     const result = await processor.handleVendasResumo(job as any);
 
-    expect(db3Client.consultarPorSegmentoPorHora).not.toHaveBeenCalled();
+    expect(db3Client.consultarPorSegmentosPorHora).not.toHaveBeenCalled();
     expect(result.granularidade).toBe('HORA');
     expect(result.registros).toEqual([]);
     expect(result.totalDia).toBe(0);

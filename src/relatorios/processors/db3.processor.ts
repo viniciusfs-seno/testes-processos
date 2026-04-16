@@ -8,14 +8,26 @@ type RegistroHoraDb3 = {
   HORA: string;
   VALOR: number;
 };
+type LojaGigaDb3 = {
+  codigo: number;
+  nome: string;
+  nomeReduzido: string | null;
+};
+type SegmentoGigaDb3 = {
+  codigo: number;
+  descricao: string;
+  status: string | null;
+};
 type ResultadoGigaDb3 = {
   database: string;
   tipoEmpresa: 'GIGA';
   periodo: { inicio: string; fim: string };
   segmentos: string[];
+  segmentosDetalhados: SegmentoGigaDb3[];
+  lojas: LojaGigaDb3[];
   registros: RegistroHoraDb3[];
   totalDia: number;
-  metodo: 'fila_sequencial';
+  metodo: 'consulta_unica';
   granularidade: 'HORA';
   faixaHoras: { inicio: string; fim: string };
 };
@@ -39,11 +51,15 @@ export class Db3Processor {
       listaSegmentos = segmentos.split(',').map((s) => s.trim());
     } else {
       listaSegmentos = [
-        '51', '52', '53', '54', '55', '56', '59', '61', '62', '63', '57', '27', '1', '10', '29',
+        '51', '52', '53', '54', '55', '56', '59', '61', '62', '63', '57', '27', '1', '10', '29', '24',
       ];
     }
 
-    job.log(`Iniciando DB3 ${tipoEmpresa}: ${listaSegmentos.length} segmentos (sequencial)`);
+    job.log(
+      tipoEmpresa === 'GIGA'
+        ? `Iniciando DB3 GIGA: ${listaSegmentos.length} segmentos (consulta unica por hora)`
+        : `Iniciando DB3 ${tipoEmpresa}: ${listaSegmentos.length} segmentos (sequencial)`,
+    );
     await job.progress(5);
 
     if (tipoEmpresa === 'GIGA') {
@@ -123,6 +139,11 @@ export class Db3Processor {
       );
     }
 
+    const [lojas, segmentosDetalhados] = await Promise.all([
+      this.listarLojasGiga(),
+      this.listarSegmentosGiga(listaSegmentos),
+    ]);
+
     if (horaFim <= horaInicio) {
       job.log('Nenhuma hora fechada a partir das 06:00 para consolidar.');
       await job.progress(100);
@@ -132,9 +153,11 @@ export class Db3Processor {
         tipoEmpresa: 'GIGA',
         periodo: { inicio: dataIni, fim: dataFim },
         segmentos: listaSegmentos,
+        segmentosDetalhados,
+        lojas,
         registros: [],
         totalDia: 0,
-        metodo: 'fila_sequencial',
+        metodo: 'consulta_unica',
         granularidade: 'HORA',
         faixaHoras,
       };
@@ -142,32 +165,29 @@ export class Db3Processor {
 
     const consolidado = new Map<number, number>();
     const totalSegmentos = listaSegmentos.length;
+    job.log(
+      `Consultando GIGA por hora em lote unico para ${totalSegmentos} segmentos...`,
+    );
+    await job.progress(25);
 
-    for (let i = 0; i < totalSegmentos; i++) {
-      const seg = listaSegmentos[i];
+    const resultados = await this.db3Client.consultarPorSegmentosPorHora(
+      dataIni,
+      horaInicio,
+      horaFim,
+      listaSegmentos,
+      'GIGA',
+    );
 
-      job.log(`[${i + 1}/${totalSegmentos}] Processando segmento ${seg} - GIGA (hora)...`);
+    resultados.forEach((row: any) => {
+      const hora = Number(row.HORA);
+      const valor = parseFloat(row.VALOR || 0);
 
-      const resultados = await this.db3Client.consultarPorSegmentoPorHora(
-        dataIni,
-        horaInicio,
-        horaFim,
-        seg,
-        'GIGA',
-      );
+      if (!Number.isNaN(hora)) {
+        consolidado.set(hora, (consolidado.get(hora) ?? 0) + valor);
+      }
+    });
 
-      resultados.forEach((row: any) => {
-        const hora = Number(row.HORA);
-        const valor = parseFloat(row.VALOR || 0);
-
-        if (!Number.isNaN(hora)) {
-          consolidado.set(hora, (consolidado.get(hora) ?? 0) + valor);
-        }
-      });
-
-      const progress = Math.round(((i + 1) / totalSegmentos) * 90) + 5;
-      await job.progress(progress);
-    }
+    await job.progress(90);
 
     const dataBr = this.formatDateBr(dataIni);
     const registros: RegistroHoraDb3[] = [];
@@ -195,9 +215,11 @@ export class Db3Processor {
       tipoEmpresa: 'GIGA',
       periodo: { inicio: dataIni, fim: dataFim },
       segmentos: listaSegmentos,
+      segmentosDetalhados,
+      lojas,
       registros,
       totalDia,
-      metodo: 'fila_sequencial',
+      metodo: 'consulta_unica',
       granularidade: 'HORA',
       faixaHoras,
     };
@@ -270,5 +292,25 @@ export class Db3Processor {
 
   private pad(valor: number) {
     return valor.toString().padStart(2, '0');
+  }
+
+  private async listarLojasGiga(): Promise<LojaGigaDb3[]> {
+    const lojas = await this.db3Client.listarEmpresasPorFaixa('GIGA');
+
+    return lojas.map((loja: any) => ({
+      codigo: Number(loja.CODIGO),
+      nome: String(loja.NOME ?? loja.NOME_REDUZIDO ?? loja.CODIGO),
+      nomeReduzido: loja.NOME_REDUZIDO ? String(loja.NOME_REDUZIDO) : null,
+    }));
+  }
+
+  private async listarSegmentosGiga(segmentos: string[]): Promise<SegmentoGigaDb3[]> {
+    const segmentosDetalhados = await this.db3Client.listarSegmentosDetalhados(segmentos);
+
+    return segmentosDetalhados.map((segmento: any) => ({
+      codigo: Number(segmento.CODIGO),
+      descricao: String(segmento.DESCRICAO ?? segmento.CODIGO),
+      status: segmento.STATUS ? String(segmento.STATUS) : null,
+    }));
   }
 }

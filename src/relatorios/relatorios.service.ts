@@ -113,12 +113,28 @@ export class RelatoriosService {
       },
     ];
 
-    this.ultimoRelatorioSubida = {
-      criadoEm: this.getFortalezaDateTime(),
-      dataIni,
-      dataFim,
-      jobs,
-    };
+    this.registrarUltimoRelatorioSubida(dataIni, dataFim, jobs);
+
+    return jobs;
+  }
+
+  async relatorioSubidaVendasGiga(dto: RelatorioSubidaVendasDto) {
+    const { dataIni, dataFim } = this.resolvePeriodo(dto);
+    const payloadBase = { dataIni, dataFim };
+    const db3Giga = await this.resumoDb3VendasGiga(payloadBase as Db3VendasResumoDto);
+
+    const jobs = [
+      {
+        nome: 'Consinco (Giga) por hora',
+        database: db3Giga.database ?? 'DB3 - CONSINCO (GIGA)',
+        queue: db3Giga.queue,
+        jobId: db3Giga.jobId,
+        statusUrl: db3Giga.statusUrl,
+        payload: payloadBase,
+      },
+    ];
+
+    this.registrarUltimoRelatorioSubida(dataIni, dataFim, jobs);
 
     return jobs;
   }
@@ -357,6 +373,26 @@ export class RelatoriosService {
     const dataIni = dto?.dataIni ?? dto?.dataFim ?? today;
     const dataFim = dto?.dataFim ?? dto?.dataIni ?? today;
     return { dataIni, dataFim };
+  }
+
+  private registrarUltimoRelatorioSubida(
+    dataIni: string,
+    dataFim: string,
+    jobs: Array<{
+      nome: string;
+      database: string;
+      queue: string;
+      jobId: string | number;
+      statusUrl: string;
+      payload: Record<string, any>;
+    }>,
+  ) {
+    this.ultimoRelatorioSubida = {
+      criadoEm: this.getFortalezaDateTime(),
+      dataIni,
+      dataFim,
+      jobs,
+    };
   }
 
   private calcularDuracao(processedOn: number | undefined, finishedOn: number | undefined) {
