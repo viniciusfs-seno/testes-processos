@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, Header } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Header, Query } from '@nestjs/common';
 import { RelatoriosService } from './relatorios.service';
 import { Db1CnsdResumoDto } from './dto/db1-cnsd-resumo.dto';
 import { Db2VendasResumoDto } from './dto/db2-vendas-resumo.dto';
@@ -11,6 +11,8 @@ import { Db5NfDetalheDto } from './dto/db5-nf-detalhe.dto';
 import { Db5NfTotalDto } from './dto/db5-nf-total.dto';
 import { RelatorioSubidaVendasDto } from './dto/relatorio-subida-vendas.dto';
 import { relatorioSubidaVendasHtml } from './relatorio-subida-vendas.ui';
+import { relatorioSubidaVendasFinalHtml } from './relatorio-subida-vendas-final.ui';
+import { gigaValidacaoHtml } from './giga-validacao.ui';
 
 @Controller('relatorios')
 export class RelatoriosController {
@@ -27,6 +29,16 @@ export class RelatoriosController {
     return this.service.relatorioSubidaVendasGiga(dto);
   }
 
+  @Post('relatorio-subida-vendas/giga-bruta')
+  async relatorioSubidaVendasGigaBruta(@Body() dto: RelatorioSubidaVendasDto) {
+    return this.service.relatorioSubidaVendasGigaBruta(dto);
+  }
+
+  @Post('relatorio-subida-vendas/giga-rdp')
+  async relatorioSubidaVendasGigaRdp(@Body() dto: RelatorioSubidaVendasDto) {
+    return this.service.relatorioSubidaVendasGigaRdp(dto);
+  }
+
   @Get('relatorio-subida-vendas/ultimo')
   async ultimoRelatorioSubidaVendas() {
     return this.service.getUltimoRelatorioSubidaVendas();
@@ -36,6 +48,28 @@ export class RelatoriosController {
   @Header('Content-Type', 'text/html; charset=utf-8')
   relatorioSubidaVendasUi() {
     return relatorioSubidaVendasHtml;
+  }
+
+  @Get('relatorio-subida-vendas/final')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  relatorioSubidaVendasFinalUi() {
+    return relatorioSubidaVendasFinalHtml;
+  }
+
+  @Get('relatorio-subida-vendas/final/data')
+  async relatorioSubidaVendasFinalData() {
+    return this.service.getRelatorioSubidaVendasFinalData();
+  }
+
+  @Get('giga-validacao/ui')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  gigaValidacaoUi() {
+    return gigaValidacaoHtml;
+  }
+
+  @Get('giga-validacao/data')
+  async gigaValidacaoData(@Query() dto: Db3VendasResumoDto) {
+    return this.service.getGigaValidacaoData(dto);
   }
 
   // ─── DB1 ─────────────────────────────────────────────────────────────────────
@@ -59,6 +93,16 @@ export class RelatoriosController {
   @Post('db3/vendas-resumo-giga')
   async vendasConsincoResumoGiga(@Body() dto: Db3VendasResumoDto) {
     return this.service.resumoDb3VendasGiga(dto);
+  }
+
+  @Post('db3/vendas-resumo-giga-bruta')
+  async vendasConsincoResumoGigaBruta(@Body() dto: Db3VendasResumoDto) {
+    return this.service.resumoDb3VendasGigaBruta(dto);
+  }
+
+  @Post('db3/vendas-resumo-giga-rdp')
+  async vendasConsincoResumoGigaRdp(@Body() dto: Db3VendasResumoDto) {
+    return this.service.resumoDb3VendasGigaRdp(dto);
   }
 
   // ─── DB4 ─────────────────────────────────────────────────────────────────────

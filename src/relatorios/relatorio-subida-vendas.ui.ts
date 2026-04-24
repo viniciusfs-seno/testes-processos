@@ -115,6 +115,13 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
         transform: translateY(-2px);
       }
 
+      .controls button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+        transform: none;
+        box-shadow: none;
+      }
+
       .controls button.secondary {
         background: #fff;
         color: var(--accent-3);
@@ -399,7 +406,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           <input type="date" id="dataIni" />
           <input type="date" id="dataFim" />
           <button id="btnGerar">Gerar relatorio</button>
-          <button id="btnGerarGiga" type="button">Puxar so GIGA</button>
+          <button id="btnAbrirFinal" class="secondary" type="button" disabled>Abrir relatorio final</button>
           <button id="btnAtualizar" class="secondary" type="button">Atualizar resultados</button>
           <button id="btnLogs" class="secondary" type="button">Ver logs do ultimo relatorio</button>
         </div>
@@ -427,7 +434,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
         const api = {
           last: "/relatorios/relatorio-subida-vendas/ultimo",
           start: "/relatorios/relatorio-subida-vendas",
-          startGiga: "/relatorios/relatorio-subida-vendas/giga",
+          finalView: "/relatorios/relatorio-subida-vendas/final",
           status: function (queue, id) {
             return "/relatorios/job/" + queue + "/" + id;
           },
@@ -505,6 +512,15 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             state.statuses.length > 0 &&
             state.statuses.every(function (item) {
               return item && isTerminalStatus(item.status);
+            })
+          );
+        }
+
+        function allJobsCompletedSuccessfully() {
+          return (
+            state.statuses.length > 0 &&
+            state.statuses.every(function (item) {
+              return item && item.status === "completed";
             })
           );
         }
@@ -608,6 +624,10 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
               : null;
           const totalDia =
             result && Number.isFinite(Number(result.totalDia)) ? Number(result.totalDia) : null;
+          const criterioConsulta =
+            result && result.criterioConsulta ? String(result.criterioConsulta) : null;
+          const criterioValor =
+            result && result.criterioValor ? String(result.criterioValor) : null;
 
           const chips = [];
           chips.push(
@@ -675,6 +695,22 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             chips.push(
               "<div class=\\"result-chip\\"><div class=\\"result-title\\">Total do Dia</div><strong>" +
                 formatValue(totalDia) +
+                "</strong></div>"
+            );
+          }
+
+          if (criterioConsulta) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Consulta</div><strong>" +
+                escapeHtml(criterioConsulta) +
+                "</strong></div>"
+            );
+          }
+
+          if (criterioValor) {
+            chips.push(
+              "<div class=\\"result-chip\\"><div class=\\"result-title\\">Criterio</div><strong>" +
+                escapeHtml(criterioValor) +
                 "</strong></div>"
             );
           }
@@ -858,6 +894,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           const jobsEl = byId("jobs");
           const emptyEl = byId("empty");
           const logsPanel = byId("logsPanel");
+          const btnAbrirFinal = byId("btnAbrirFinal");
 
           jobsEl.innerHTML = "";
 
@@ -867,6 +904,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             jobCount.textContent = "Jobs: 0";
             emptyEl.style.display = "block";
             logsPanel.setAttribute("hidden", "");
+            btnAbrirFinal.disabled = true;
             renderOverview();
             return;
           }
@@ -877,6 +915,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             "Periodo: " + state.last.dataIni + " ate " + state.last.dataFim;
           jobCount.textContent = "Jobs: " + state.last.jobs.length;
           lastUpdate.textContent = "Ultima atualizacao: " + new Date().toLocaleTimeString();
+          btnAbrirFinal.disabled = !allJobsCompletedSuccessfully();
           renderOverview();
           renderLogsPanel();
 
@@ -965,8 +1004,11 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
         byId("btnGerar").addEventListener("click", function () {
           return triggerReport(api.start);
         });
-        byId("btnGerarGiga").addEventListener("click", function () {
-          return triggerReport(api.startGiga);
+        byId("btnAbrirFinal").addEventListener("click", function () {
+          if (!allJobsCompletedSuccessfully()) {
+            return;
+          }
+          window.open(api.finalView, "_blank");
         });
         byId("btnAtualizar").addEventListener("click", refreshAll);
         byId("btnLogs").addEventListener("click", toggleLogsPanel);

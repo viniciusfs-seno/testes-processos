@@ -3,6 +3,7 @@ import type { Job } from 'bull';
 import { Db3Client } from '../db3.client';
 
 type TipoEmpresaDb3 = 'MERCANTIL' | 'GIGA';
+type TipoConsultaGigaDb3 = 'LIQUIDA' | 'BRUTA' | 'RDP_SIMILAR';
 type RegistroHoraDb3 = {
   DATA: string;
   HORA: string;
@@ -21,10 +22,14 @@ type SegmentoGigaDb3 = {
 type ResultadoGigaDb3 = {
   database: string;
   tipoEmpresa: 'GIGA';
+  criterioConsulta: TipoConsultaGigaDb3;
   periodo: { inicio: string; fim: string };
   segmentos: string[];
-  criterioEmpresas: 'cadastro_giga_ativo';
-  criterioValor: 'vlritemsemdesc_menos_vlrdevolitemsemdesc';
+  criterioEmpresas: 'lojas_padrao_rdp';
+  criterioValor:
+    | 'vlritemsemdesc_menos_vlrdevolitemsemdesc'
+    | 'vlritem_menos_vlrdevolitem'
+    | 'vlritem_aproximado_rdp';
   segmentosDetalhados: SegmentoGigaDb3[];
   lojas: LojaGigaDb3[];
   registros: RegistroHoraDb3[];
@@ -45,27 +50,33 @@ export class Db3Processor {
       dataFim: string;
       segmentos?: string;
       tipoEmpresa: TipoEmpresaDb3;
+      tipoConsultaGiga?: TipoConsultaGigaDb3;
     };
+    const tipoConsultaGiga = job.data?.tipoConsultaGiga ?? 'LIQUIDA';
 
     let listaSegmentos: string[];
 
     if (segmentos && segmentos.trim().length > 0) {
       listaSegmentos = segmentos.split(',').map((s) => s.trim());
     } else {
-      listaSegmentos = [
-        '51', '52', '53', '54', '55', '56', '59', '61', '62', '63', '57', '27', '1', '10', '29', '24',
-      ];
+      listaSegmentos = this.getSegmentosPadrao(tipoEmpresa);
     }
 
     job.log(
       tipoEmpresa === 'GIGA'
-        ? `Iniciando DB3 GIGA: ${listaSegmentos.length} segmentos (consulta unica por hora)`
+        ? `Iniciando DB3 GIGA ${tipoConsultaGiga}: ${listaSegmentos.length} segmentos (consulta unica por hora)`
         : `Iniciando DB3 ${tipoEmpresa}: ${listaSegmentos.length} segmentos (sequencial)`,
     );
     await job.progress(5);
 
     if (tipoEmpresa === 'GIGA') {
-      return this.handleGigaPorHora(job, dataIni, dataFim, listaSegmentos);
+      return this.handleGigaPorHora(
+        job,
+        dataIni,
+        dataFim,
+        listaSegmentos,
+        tipoConsultaGiga,
+      );
     }
 
     const consolidado = new Map<string, number>();
@@ -123,11 +134,32 @@ export class Db3Processor {
     };
   }
 
+  private getSegmentosPadrao(tipoEmpresa: TipoEmpresaDb3) {
+    if (tipoEmpresa === 'GIGA') {
+      return ['1', '10', '24', '27', '28', '29', '63'];
+    }
+
+    return ['51', '52', '53', '54', '55', '56', '59', '61', '62', '63', '57', '27', '1', '10', '29', '24'];
+  }
+
+  private getCriterioValor(tipoConsultaGiga: TipoConsultaGigaDb3) {
+    if (tipoConsultaGiga === 'BRUTA') {
+      return 'vlritemsemdesc_menos_vlrdevolitemsemdesc' as const;
+    }
+
+    if (tipoConsultaGiga === 'RDP_SIMILAR') {
+      return 'vlritem_aproximado_rdp' as const;
+    }
+
+    return 'vlritem_menos_vlrdevolitem' as const;
+  }
+
   private async handleGigaPorHora(
     job: Job,
     dataIni: string,
     dataFim: string,
     listaSegmentos: string[],
+    tipoConsultaGiga: TipoConsultaGigaDb3,
   ): Promise<ResultadoGigaDb3> {
     const { horaInicioConsulta, horaFimConsulta, faixaFimLabel } =
       this.getFaixaHorariaConsulta(dataIni);
@@ -146,7 +178,7 @@ export class Db3Processor {
     const consolidado = new Map<number, number>();
     const totalSegmentos = listaSegmentos.length;
     job.log(
-      `Consultando GIGA por hora em lote unico para ${totalSegmentos} segmentos...`,
+      `Consultando GIGA ${tipoConsultaGiga} por hora em lote unico para ${totalSegmentos} segmentos...`,
     );
     await job.progress(25);
 
@@ -156,6 +188,7 @@ export class Db3Processor {
       horaFimConsulta,
       listaSegmentos,
       'GIGA',
+      tipoConsultaGiga,
     );
 
     resultados.forEach((row: any) => {
@@ -186,10 +219,11 @@ export class Db3Processor {
       return {
         database: 'DB3 - CONSINCO',
         tipoEmpresa: 'GIGA',
+        criterioConsulta: tipoConsultaGiga,
         periodo: { inicio: dataIni, fim: dataFim },
         segmentos: listaSegmentos,
-        criterioEmpresas: 'cadastro_giga_ativo',
-        criterioValor: 'vlritemsemdesc_menos_vlrdevolitemsemdesc',
+        criterioEmpresas: 'lojas_padrao_rdp',
+        criterioValor: this.getCriterioValor(tipoConsultaGiga),
         segmentosDetalhados,
         lojas,
         registros: [],
@@ -203,12 +237,9 @@ export class Db3Processor {
     const registros: RegistroHoraDb3[] = [];
 
     for (let h = horaInicioFaixa; h < horaFimFaixa; h++) {
-      const horaFimLabel =
-        h === 23 && horaFimFaixa === 24 ? '23:59' : `${this.pad(h + 1)}:00`;
-
       registros.push({
         DATA: dataBr,
-        HORA: `${this.pad(h)}:00-${horaFimLabel}`,
+        HORA: `${this.pad(h)}:00-${this.pad(h)}:59`,
         VALOR: consolidado.get(h) ?? 0,
       });
     }
@@ -223,10 +254,11 @@ export class Db3Processor {
     return {
       database: 'DB3 - CONSINCO',
       tipoEmpresa: 'GIGA',
+      criterioConsulta: tipoConsultaGiga,
       periodo: { inicio: dataIni, fim: dataFim },
       segmentos: listaSegmentos,
-      criterioEmpresas: 'cadastro_giga_ativo',
-      criterioValor: 'vlritemsemdesc_menos_vlrdevolitemsemdesc',
+      criterioEmpresas: 'lojas_padrao_rdp',
+      criterioValor: this.getCriterioValor(tipoConsultaGiga),
       segmentosDetalhados,
       lojas,
       registros,
@@ -287,7 +319,7 @@ export class Db3Processor {
     }
 
     const horaAtual = this.getHoraAtualFortaleza();
-    const horaFimConsulta = Number.isNaN(horaAtual) ? 0 : Math.min(horaAtual + 1, 24);
+    const horaFimConsulta = Number.isNaN(horaAtual) ? 0 : Math.min(horaAtual, 24);
 
     return {
       horaInicioConsulta: 0,

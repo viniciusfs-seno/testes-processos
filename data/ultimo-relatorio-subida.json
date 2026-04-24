@@ -1,0 +1,75 @@
+{
+  "criadoEm": "2026-04-24 09:57",
+  "dataIni": "2026-04-24",
+  "dataFim": "2026-04-24",
+  "jobs": [
+    {
+      "nome": "Emporium lojas (bandeiras)",
+      "database": "DB1",
+      "queue": "db1-relatorios",
+      "jobId": "50",
+      "statusUrl": "/relatorios/job/db1-relatorios/50",
+      "payload": {
+        "dataIni": "2026-04-24",
+        "dataFim": "2026-04-24"
+      }
+    },
+    {
+      "nome": "Emporium atacado (Mercantil)",
+      "database": "DB2",
+      "queue": "db2-relatorios",
+      "jobId": "49",
+      "statusUrl": "/relatorios/job/db2-relatorios/49",
+      "payload": {
+        "dataIni": "2026-04-24",
+        "dataFim": "2026-04-24"
+      }
+    },
+    {
+      "nome": "Consinco (Mercantil)",
+      "database": "DB3 - CONSINCO",
+      "queue": "db3-relatorios",
+      "jobId": "113",
+      "statusUrl": "/relatorios/job/db3-relatorios/113",
+      "payload": {
+        "dataIni": "2026-04-24",
+        "dataFim": "2026-04-24"
+      }
+    },
+    {
+      "nome": "Consinco (Giga) por hora",
+      "database": "DB3 - CONSINCO",
+      "queue": "db3-relatorios",
+      "jobId": "114",
+      "statusUrl": "/relatorios/job/db3-relatorios/114",
+      "payload": {
+        "dataIni": "2026-04-24",
+        "dataFim": "2026-04-24"
+      }
+    },
+    {
+      "nome": "Emporium farmacias",
+      "database": "DB4 - Emporium Farmácias (MySQL)",
+      "queue": "db4-relatorios",
+      "jobId": "44",
+      "statusUrl": "/relatorios/job/db4-relatorios/44",
+      "payload": {
+        "dataIni": "2026-04-24",
+        "dataFim": "2026-04-24",
+        "cdLoja": 0
+      }
+    },
+    {
+      "nome": "MDLog",
+      "database": "DB5 - MDLog (Oracle)",
+      "queue": "db5-relatorios",
+      "jobId": "44",
+      "statusUrl": "/relatorios/job/db5-relatorios/44",
+      "payload": {
+        "dataIni": "2026-04-24",
+        "dataFim": "2026-04-24",
+        "cdLoja": 0
+      }
+    }
+  ]
+}
