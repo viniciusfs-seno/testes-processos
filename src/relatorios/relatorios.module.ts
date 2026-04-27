@@ -22,9 +22,11 @@ import { Db5Processor } from './processors/db5.processor';
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
+        // Este clone local reutiliza o Redis compartilhado do ambiente
+        // (por padrao em localhost:6379), sem exigir um novo container aqui.
         redis: {
           host: configService.get<string>('REDIS_HOST', 'localhost'),
-          port: Number(configService.get<string>('REDIS_PORT')),
+          port: Number(configService.get<string>('REDIS_PORT', '6379')),
           password: configService.get<string>('REDIS_PASSWORD') || undefined,
         },
       }),

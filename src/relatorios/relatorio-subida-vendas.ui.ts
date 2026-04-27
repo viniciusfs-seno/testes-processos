@@ -129,6 +129,25 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
         box-shadow: none;
       }
 
+      .action-feedback {
+        margin-top: 12px;
+        min-height: 20px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .action-feedback[data-state="loading"] {
+        color: var(--accent-3);
+      }
+
+      .action-feedback[data-state="error"] {
+        color: #8f2430;
+      }
+
+      .action-feedback[data-state="success"] {
+        color: #1a6b63;
+      }
+
       .error-box {
         border-radius: 12px;
         padding: 12px;
@@ -410,6 +429,7 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           <button id="btnAtualizar" class="secondary" type="button">Atualizar resultados</button>
           <button id="btnLogs" class="secondary" type="button">Ver logs do ultimo relatorio</button>
         </div>
+        <div class="action-feedback" id="actionFeedback" aria-live="polite"></div>
       </section>
 
       <div class="status-bar">
@@ -564,6 +584,24 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
             return "--";
           }
           return String(value);
+        }
+
+        function setActionFeedback(message, kind) {
+          const feedback = byId("actionFeedback");
+          feedback.textContent = message || "";
+          if (kind) {
+            feedback.setAttribute("data-state", kind);
+          } else {
+            feedback.removeAttribute("data-state");
+          }
+        }
+
+        function setGeneratingState(isGenerating) {
+          const btnGerar = byId("btnGerar");
+          const btnAtualizar = byId("btnAtualizar");
+          btnGerar.disabled = isGenerating;
+          btnAtualizar.disabled = isGenerating;
+          btnGerar.textContent = isGenerating ? "Gerando..." : "Gerar relatorio";
         }
 
         function sumNumericField(registros, fieldName) {
@@ -985,17 +1023,44 @@ export const relatorioSubidaVendasHtml = `<!doctype html>
           if (dataIni) payload.dataIni = dataIni;
           if (dataFim) payload.dataFim = dataFim;
 
-          const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
+          setGeneratingState(true);
+          setActionFeedback("Gerando relatorio e enfileirando jobs...", "loading");
 
-          if (res.ok) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(function () {
+            controller.abort();
+          }, 15000);
+
+          try {
+            const res = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+              signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!res.ok) {
+              const errorText = await res.text();
+              throw new Error(errorText || "Falha ao gerar relatorio.");
+            }
+
+            setActionFeedback("Relatorio iniciado com sucesso. Atualizando status dos jobs...", "success");
             startAutoRefresh();
             await refreshAll();
-          } else {
-            alert("Falha ao gerar relatorio.");
+          } catch (error) {
+            clearTimeout(timeoutId);
+            const message =
+              error && error.name === "AbortError"
+                ? "A geracao demorou demais para responder. Verifique a conexao com Redis/filas."
+                : error && error.message
+                  ? error.message
+                  : "Falha ao gerar relatorio.";
+            setActionFeedback(message, "error");
+            alert(message);
+          } finally {
+            setGeneratingState(false);
           }
         }
 

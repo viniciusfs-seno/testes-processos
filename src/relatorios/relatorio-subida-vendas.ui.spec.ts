@@ -3,9 +3,12 @@ import { relatorioSubidaVendasFinalHtml } from './relatorio-subida-vendas-final.
 import { relatorioSubidaVendasHtml } from './relatorio-subida-vendas.ui';
 
 describe('relatorioSubidaVendasHtml', () => {
-  it('expoe o botao para abrir o relatorio final e nao mostra botoes dedicados de giga', () => {
+  it('expoe o botao para abrir o relatorio final, feedback de geracao e nao mostra botoes dedicados de giga', () => {
     expect(relatorioSubidaVendasHtml).toContain('btnAbrirFinal');
+    expect(relatorioSubidaVendasHtml).toContain('actionFeedback');
     expect(relatorioSubidaVendasHtml).toContain('allJobsCompletedSuccessfully');
+    expect(relatorioSubidaVendasHtml).toContain('Gerando...');
+    expect(relatorioSubidaVendasHtml).toContain('Verifique a conexao com Redis/filas.');
     expect(relatorioSubidaVendasHtml).toContain('/relatorios/relatorio-subida-vendas/final');
     expect(relatorioSubidaVendasHtml).not.toContain('btnGerarGigaLiquida');
     expect(relatorioSubidaVendasHtml).not.toContain('btnGerarGigaBruta');
